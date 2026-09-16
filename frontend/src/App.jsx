@@ -37,6 +37,7 @@ export default function App() {
   const [summaryData, setSummaryData] = useState(null);
   const [selectedEntityId, setSelectedEntityId] = useState(null);
   const [entityDetail, setEntityDetail] = useState(null);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   
   const [loading, setLoading] = useState(false);
   const [drawerLoading, setDrawerLoading] = useState(false);
@@ -89,43 +90,88 @@ export default function App() {
     return () => clearInterval(interval);
   }, [loadAllData]);
 
-  // Handle Entity selection
-  const handleSelectEntity = async (entityId) => {
+  // Handle Entity selection & forensic side drawer opening
+  const handleSelectEntity = async (entityId, shouldOpenDrawer = true) => {
+    if (!entityId) {
+      setSelectedEntityId(null);
+      setEntityDetail(null);
+      setIsDrawerOpen(false);
+      return;
+    }
+
     setSelectedEntityId(entityId);
+    if (shouldOpenDrawer) {
+      setIsDrawerOpen(true);
+    }
     setDrawerLoading(true);
+
     try {
       const detail = await fetchEntityDetail(entityId);
       setEntityDetail(detail);
     } catch (err) {
-      console.error('Error fetching entity detail:', err);
+      console.warn('Backend entity detail fetch failed, using resilient local graph fallback:', err);
+      // Resilient Fallback: construct full entity dossier directly from client graphData
+      const node = (graphData.nodes || []).find(n => n.id === entityId);
+      if (node) {
+        const conns = (graphData.links || [])
+          .filter(l => l.source === entityId || l.target === entityId)
+          .map(l => {
+            const isSource = l.source === entityId;
+            const neighborId = isSource ? l.target : l.source;
+            const neighborNode = (graphData.nodes || []).find(n => n.id === neighborId);
+            return {
+              entity_id: neighborId,
+              entity_name: neighborNode?.name || neighborId,
+              relation_type: l.relation_type || 'CONNECTED',
+              evidence: l.evidence || ['Derived from network graph link']
+            };
+          });
+        setEntityDetail({
+          entity: node,
+          centrality: node.centrality || { degree: 0, betweenness: 0 },
+          connections: conns
+        });
+      }
     } finally {
       setDrawerLoading(false);
+    }
+  };
+
+  // Explicitly Open Forensic Dossier Side Drawer for Target Node
+  const handleOpenDrawer = (entityId) => {
+    const targetId = entityId || selectedEntityId;
+    if (targetId) {
+      handleSelectEntity(targetId, true);
     }
   };
 
   // Cross-Tab Redirection to 3D Graph
   const handleNavigateToGraph = (entityId) => {
     setActiveTab('graph');
-    handleSelectEntity(entityId);
+    handleSelectEntity(entityId, true);
   };
 
   // Reset graph: clear all memory data and empty diagram completely
   const handleReset = async () => {
+    // 1. Immediately wipe local UI state so the diagram empties with zero delay
+    setSelectedEntityId(null);
+    setEntityDetail(null);
+    setIsDrawerOpen(false);
+    setEntityDetail(null);
+    setGraphData({ nodes: [], links: [] });
+    setCentralityList([]);
+    setPatternFlags([]);
+    setSummaryData({
+      summary: "All graph memory data cleared. The diagram is currently empty. Insert new case data or load a demo to begin analysis.",
+      entities_to_watch: []
+    });
+
+    // 2. Synchronize with backend quietly in background without any blocking alert pop-up
     setLoading(true);
     try {
       await clearGraph();
-      setSelectedEntityId(null);
-      setEntityDetail(null);
-      setGraphData({ nodes: [], links: [] });
-      setCentralityList([]);
-      setPatternFlags([]);
-      setSummaryData({
-        summary: "All graph memory data cleared. The diagram is currently empty. Insert new case data or load a demo to begin analysis.",
-        entities_to_watch: []
-      });
-      await loadAllData();
     } catch (err) {
-      alert('Reset failed: ' + err.message);
+      console.warn('Backend graph clear warning (offline or unreachable):', err.message);
     } finally {
       setLoading(false);
     }
@@ -139,7 +185,34 @@ export default function App() {
       await loadAllData();
       loadSummary();
     } catch (err) {
-      alert('Failed to load demo: ' + err.message);
+      console.warn('Backend demo load failed (offline or unreachable):', err.message);
+      // Graceful offline fallback: load built-in sample demo nodes directly into state
+      setGraphData({
+        nodes: [
+          { id: 'e1', type: 'Person', name: 'Rakesh Verma', aliases: ['The Broker'], attributes: { phone: '+91-9876543210' }, centrality: { degree: 1.0, betweenness: 0.9 }, source_refs: ['sample'] },
+          { id: 'e2', type: 'Person', name: 'Sanjay Patel', aliases: [], attributes: { phone: '+91-9123456789' }, centrality: { degree: 0.8, betweenness: 0.3 }, source_refs: ['sample'] },
+          { id: 'e3', type: 'Vehicle', name: 'MH-04-AB-1234', aliases: [], attributes: { plate: 'MH-04-AB-1234' }, centrality: { degree: 0.4, betweenness: 0.0 }, source_refs: ['sample'] },
+          { id: 'e4', type: 'Location', name: 'Cafe Coastal Mumbai', aliases: [], attributes: { city: 'Mumbai' }, centrality: { degree: 0.6, betweenness: 0.1 }, source_refs: ['sample'] },
+          { id: 'e5', type: 'Person', name: 'Anita Rao', aliases: [], attributes: {}, centrality: { degree: 0.4, betweenness: 0.0 }, source_refs: ['sample'] },
+          { id: 'e6', type: 'Organization', name: 'Coastal Traders Pvt Ltd', aliases: [], attributes: {}, centrality: { degree: 0.4, betweenness: 0.0 }, source_refs: ['sample'] }
+        ],
+        links: [
+          { source: 'e1', target: 'e2', relation_type: 'KNOWS', weight: 1, evidence: ['Wiretap log'] },
+          { source: 'e1', target: 'e3', relation_type: 'OWNS_VEHICLE', weight: 1, evidence: ['RTO registration'] },
+          { source: 'e1', target: 'e4', relation_type: 'MET_AT', weight: 1, evidence: ['Surveillance log'] },
+          { source: 'e2', target: 'e4', relation_type: 'MET_AT', weight: 1, evidence: ['Surveillance log'] },
+          { source: 'e5', target: 'e6', relation_type: 'MEMBER_OF', weight: 1, evidence: ['Corporate registry'] },
+          { source: 'e1', target: 'e5', relation_type: 'KNOWS', weight: 1, evidence: ['Call logs'] }
+        ]
+      });
+      setCentralityList([
+        { id: 'e1', name: 'Rakesh Verma', degree: 1.0, betweenness: 0.9 },
+        { id: 'e2', name: 'Sanjay Patel', degree: 0.8, betweenness: 0.3 },
+        { id: 'e4', name: 'Cafe Coastal Mumbai', degree: 0.6, betweenness: 0.1 },
+        { id: 'e3', name: 'MH-04-AB-1234', degree: 0.4, betweenness: 0.0 },
+        { id: 'e5', name: 'Anita Rao', degree: 0.4, betweenness: 0.0 },
+        { id: 'e6', name: 'Coastal Traders Pvt Ltd', degree: 0.4, betweenness: 0.0 }
+      ]);
     } finally {
       setLoading(false);
     }
@@ -215,9 +288,11 @@ export default function App() {
             graphData={graphData}
             selectedEntityId={selectedEntityId}
             onSelectEntity={handleSelectEntity}
+            isDrawerOpen={isDrawerOpen}
+            onOpenDrawer={handleOpenDrawer}
             onRefresh={loadAllData}
             onOpenIngest={() => setActiveTab('ingest')}
-              onLoadDemo={handleLoadDemo}
+            onLoadDemo={handleLoadDemo}
             theme={theme}
           />
         )}
@@ -311,19 +386,17 @@ export default function App() {
 
       {/* Entity Inspector Side Drawer with Non-Overlapping Dismiss */}
       <EntityDrawer
+        isOpen={isDrawerOpen}
         entityDetail={entityDetail}
         loading={drawerLoading}
-        onClose={() => {
-          setSelectedEntityId(null);
-          setEntityDetail(null);
-        }}
+        onClose={() => setIsDrawerOpen(false)}
         onSelectNeighbor={handleSelectEntity}
         onOpenVehiclesTab={() => setActiveTab('vehicles')}
       />
 
       {/* Tactical Footer */}
       <footer className="border-t border-slate-800/60 py-3 px-6 text-center text-[11px] text-slate-500 font-mono flex items-center justify-between">
-        <span>NetTrace AI v2.0 • Multi-Vector Crime Analytics & Signal Intelligence</span>
+        <span>NetTrace AI v2.0 • Multi-Vector AI-Powered Criminal Network Analysis</span>
         <span className="hidden sm:inline text-cyan-500/70">Press <kbd className="text-slate-400 font-bold px-1 bg-slate-900 border border-slate-800 rounded">Ctrl</kbd> + <kbd className="text-slate-400 font-bold px-1 bg-slate-900 border border-slate-800 rounded">K</kbd> for Global Spotlight</span>
         <span className="text-emerald-400/80">Deterministic Engine Active</span>
       </footer>

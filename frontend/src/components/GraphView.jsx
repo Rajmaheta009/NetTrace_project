@@ -48,6 +48,8 @@ export default function GraphView({
   graphData, 
   selectedEntityId, 
   onSelectEntity, 
+  isDrawerOpen = false,
+  onOpenDrawer,
   onRefresh,
   onOpenIngest,
   onLoadDemo,
@@ -1116,7 +1118,7 @@ export default function GraphView({
 
         {/* INTERACTIVE 1-HOP NEIGHBORHOOD HUD CARD */}
         {selectedNode && (
-          <div className="absolute top-4 right-4 z-20 max-w-sm bg-slate-950/95 backdrop-blur-xl border border-cyan-500/50 rounded-2xl p-4 shadow-2xl shadow-cyan-950/50 animate-fadeIn font-sans">
+          <div className={`absolute top-4 ${isDrawerOpen ? 'right-4 lg:right-[405px]' : 'right-4'} z-20 max-w-sm bg-slate-950/95 backdrop-blur-xl border border-cyan-500/50 rounded-2xl p-4 shadow-2xl shadow-cyan-950/50 animate-fadeIn font-sans transition-all duration-300`}>
             <div className="flex items-start justify-between border-b border-slate-800 pb-2.5">
               <div>
                 <div className="flex items-center space-x-2">
@@ -1196,11 +1198,22 @@ export default function GraphView({
             <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
               <span className="text-slate-500">Inspect 1-hop neighborhood & evidence</span>
               <button
-                onClick={() => onSelectEntity(selectedNode.id)}
-                className="text-cyan-400 hover:text-cyan-200 font-bold inline-flex items-center space-x-0.5"
+                onClick={() => {
+                  if (onOpenDrawer) {
+                    onOpenDrawer(selectedNode.id);
+                  } else {
+                    onSelectEntity(selectedNode.id);
+                  }
+                }}
+                className={`font-bold inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl transition shadow-sm cursor-pointer ${
+                  isDrawerOpen
+                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                    : 'bg-cyan-500/10 hover:bg-cyan-500/25 text-cyan-300 hover:text-white border border-cyan-500/30'
+                }`}
+                title="Open forensic dossier side drawer"
               >
-                <span>Drawer</span>
-                <ChevronRight className="w-3.5 h-3.5" />
+                <span>{isDrawerOpen ? 'Drawer Open' : 'Open Drawer'}</span>
+                <ChevronRight className={`w-3.5 h-3.5 transition-transform ${isDrawerOpen ? 'rotate-90 text-cyan-400' : ''}`} />
               </button>
             </div>
           </div>

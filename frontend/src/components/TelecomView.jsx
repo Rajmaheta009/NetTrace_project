@@ -187,6 +187,13 @@ export default function TelecomView({
 
   const burnerCount = telecomDirectory.filter(p => p.isBurner).length;
 
+  // Dynamic BTS (Base Transceiver Station) Cell Tower Triangulation Rate
+  const btsTriangulationPct = useMemo(() => {
+    if (!cdrLogs.length) return 0;
+    const withTower = cdrLogs.filter(c => Boolean(c.tower)).length;
+    return Math.round((withTower / cdrLogs.length) * 100);
+  }, [cdrLogs]);
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       
@@ -198,7 +205,7 @@ export default function TelecomView({
           </div>
           <div>
             <div className="text-2xl font-black text-white">{telecomDirectory.length}</div>
-            <div className="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Monitored Lines</div>
+            <div className="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Registered Lines</div>
           </div>
         </div>
 
@@ -208,7 +215,7 @@ export default function TelecomView({
           </div>
           <div>
             <div className="text-2xl font-black text-rose-400">{burnerCount}</div>
-            <div className="text-[11px] text-rose-300/80 font-medium uppercase tracking-wider">Burner Pool SIMs</div>
+            <div className="text-[11px] text-rose-300/80 font-medium uppercase tracking-wider">Cloned/Pool SIMs</div>
           </div>
         </div>
 
@@ -227,7 +234,7 @@ export default function TelecomView({
             <Wifi className="w-6 h-6" />
           </div>
           <div>
-            <div className="text-2xl font-black text-emerald-300">100%</div>
+            <div className="text-2xl font-black text-emerald-300">{btsTriangulationPct}%</div>
             <div className="text-[11px] text-slate-400 font-medium uppercase tracking-wider">BTS Triangulation</div>
           </div>
         </div>

@@ -18,6 +18,7 @@ import {
 import { getEntityColor, RELATION_LABELS } from '../utils/colors';
 
 export default function EntityDrawer({ 
+  isOpen = true,
   entityDetail, 
   loading, 
   onClose, 
@@ -26,6 +27,14 @@ export default function EntityDrawer({
 }) {
   const [minimized, setMinimized] = useState(false);
 
+  // Auto-expand drawer whenever a new entity is selected or opened
+  React.useEffect(() => {
+    if (isOpen && entityDetail) {
+      setMinimized(false);
+    }
+  }, [isOpen, entityDetail?.entity?.id]);
+
+  if (!isOpen) return null;
   if (!entityDetail && !loading) return null;
 
   const entity = entityDetail?.entity;
