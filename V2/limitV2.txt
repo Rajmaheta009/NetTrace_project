@@ -1,0 +1,39 @@
+Good question — this is a hackathon-grade heuristic, not a production classifier. Here's what actually breaks it in the real world:
+
+**1. The classifier itself is heuristic, not semantic**
+- `csv.Sniffer` guesses delimiters from a 4KB sample — it regularly misfires on real files (e.g. a report that happens to contain commas in prose gets misread as CSV-ish, or a genuinely tab-separated file with inconsistent whitespace gets rejected outright).
+- The "structured" bar is exact column-name matching (`id,type,name` / `source,target,relation_type`). A real export from a police records system will use `entity_id`, `full_name`, `linked_to` — completely reasonable structured data that gets bucketed as semi-structured and pushed through the (slower, costlier, less precise) AI path even though it didn't need to be.
+- The 60% key:value-line threshold for "semi-structured" is arbitrary. A prose report that happens to contain several `Time: 10:30pm`, `Location: Cafe` style lines can get misclassified.
+
+**2. Flattening throws away structure the AI could have used**
+`_flatten_json_to_text` / `_flatten_rows_to_text` collapse nested JSON (arrays inside objects, e.g. `{"name": "X", "known_associates": ["Y","Z"]}`) into a single stringified line — nested relationships implied by the original structure get flattened into prose the LLM has to re-infer, when the shape was actually recoverable programmatically.
+
+**3. No file-format support at all**
+Everything here assumes the caller already has *text*. Real investigative input is PDFs (scanned reports), images (photos of documents, need OCR), audio/video transcripts, Excel with multiple sheets, .docx. None of that is handled — a PDF blob would just fail the JSON/CSV checks and get shoved into the LLM as raw bytes-as-string, which is nonsense input, not "unstructured text."
+
+**4. Evidence/traceability gets weaker for semi-structured data**
+Your PRD's evidence rule requires every relationship to retain its source snippet. For structured CSV, the evidence is a clean row. Once flattened into a synthetic `"key: value, key: value"` line, the evidence snippet investigators see is code-generated text, not the original document — a courtroom/audit context would want the literal original cell/row, not a reconstruction.
+
+**5. Cost and scale**
+- Structured data was free (no LLM call). The moment something is classified semi-structured, every record gets an LLM call via `extract_from_text_chunk`. A 10,000-row CSV with slightly-wrong column names now means thousands of AI calls instead of one deterministic parse — real cost and latency problem, and `split_text_into_chunks` splits on blank lines with no size cap, so a huge flattened blob could also blow past context limits in the other direction.
+- No batching, no rate-limiting, no caching of repeated LLM calls.
+
+**6. No confidence score or human review step**
+The classifier makes a binary decision and never surfaces uncertainty. In a real tool, borderline cases (ragged CSV, mixed content) should probably prompt a human ("this looks like a table with unexpected columns — map these fields?") rather than silently guessing and auto-routing.
+
+**7. No schema-mapping memory**
+Every semi-structured import is treated as brand new. If an investigator repeatedly uploads exports from the same records system with the same non-standard columns, the system re-runs full AI extraction every time instead of learning "oh, `full_name` means `name`" once and reusing that mapping deterministically going forward.
+
+**8. Mixed-content files aren't handled**
+A single upload that's part structured table, part free-text notes (very common — a spreadsheet with a "notes" column full of prose) gets classified as one bucket for the whole file. It can't split a file per-field/per-section into different pipelines.
+
+**9. Language and encoding assumptions**
+Everything assumes UTF-8, Latin-script, English-ish key:value patterns (`:` or `=`). Reports in other languages/scripts, or non-UTF-8 encoded exports, aren't accounted for.
+
+**10. Untested against the live stack**
+I could only unit-test `data_classifier.py` in isolation (pure stdlib, no deps). The sandbox has no network access, so I never ran this through `pip install`, a live `uvicorn` server, or an actual Gemini call — the wiring in `pipeline.py`/`main.py` is verified by code inspection and syntax compilation, not an end-to-end request. You should run the curl test from earlier locally before trusting this in a demo.
+
+**11. Still in-memory, single-process**
+Unrelated to this feature specifically, but worth repeating: no persistence, no concurrency safety, no auth — this whole backend resets on restart and isn't multi-user safe, which your PRD already scoped out but is worth remembering before this "just works on any file" framing gives false confidence for anything beyond the hackathon demo.
+
+If you want, I can prioritize fixes for the ones that matter most for your actual demo — my guess would be **#1 (loosen the structured-schema match to be more forgiving of common column aliases)** and **#5 (cap chunk size / batch LLM calls)** since those are the two most likely to visibly misbehave live.

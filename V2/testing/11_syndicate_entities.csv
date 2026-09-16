@@ -1,0 +1,14 @@
+id,type,name,phone
+p1,Person,Vikram 'Ghost' Singhania,+91-9876543210
+p2,Person,Rajesh Shrestha,+971-50-1122334
+p3,Person,Anita Rao,+91-9123456789
+p4,Person,Sanjay Patel,+91-9876543210
+p5,Person,Imran 'Chhota' Khan,+91-9876500111
+p6,Person,Tariq Mansoor,+91-9876500222
+org1,Organization,Al-Zahra Global Trading LLC,
+org2,Organization,Coastal Shipping & Logistics,
+v1,Vehicle,MH-01-CZ-9999,
+v2,Vehicle,MH-04-AB-1234,
+loc1,Location,Dock 14 Nhava Sheva Port,
+loc2,Location,Penthouse 7B Bandra West,
+loc3,Location,Cafe Coastal Marine Drive,

@@ -1,0 +1,19 @@
+{
+  "entities": [
+    {
+      "id": "e1",
+      "type": "Person",
+      "name": "Rakesh Verma"
+    }
+  ],
+  "relationships": [
+    {
+      "source": "e1",
+      "target": "does-not-exist",
+      "relation_type": "KNOWS",
+      "evidence": [
+        "Invalid target test."
+      ]
+    }
+  ]
+}

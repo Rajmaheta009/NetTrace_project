@@ -1,0 +1,84 @@
+# [SECURITY NOTE] API keys must never be stored in plain text notes. Use .env instead.
+
+Re-view the classifier file to walk through it line by line
+app/data_classifier.py — line by line
+Lines 24–34: imports and constants
+
+csv, io, json — all stdlib, no new dependency, no AI call.
+Bucket / EffectiveType — type aliases just for readability.
+STRUCTURED_ENTITY_COLUMNS = {"id","type","name"} and STRUCTURED_RELATIONSHIP_COLUMNS = {"source","target","relation_type"} — the exact schemas your PRD already defines. These are the bar for calling something "structured."
+Lines 37–41: ClassificationResult
+A small dataclass returned by the function — bucket (label for the UI), effective_type (which of your existing csv/json/text branches to run), content (possibly rewritten).
+
+Line 44–47: entry point, empty-input guard
+classify_and_normalize(raw_content) strips whitespace; empty input is called unstructured and passed through — falls into your existing "empty text" warning path in pipeline.py.
+
+Lines 49–59: JSON check (tried first)
+
+json_lib.loads(content) — if it throws, payload stays None and we fall through to the CSV check.
+If it parses and is a dict with an entities or relationships key → structured, effective_type="json", content untouched. This is exactly your original schema, so it goes straight to parse_json.
+If it parses but doesn't have that shape (e.g. a bare list of records, or a dict with different keys) → semi_structured, and _flatten_json_to_text turns it into text (see below).
+Lines 61–72: CSV check (tried second, only if not JSON)
+
+_try_parse_delimited uses csv.Sniffer to guess the delimiter (comma, tab, semicolon, pipe) instead of assuming comma — handles TSV exports etc.
+header = lowercased first row as a set. row_lengths = set of row lengths across all rows — if that set has more than one value, rows are ragged (malformed CSV).
+If well-formed and the header is a superset of the entity or relationship columns → structured, csv, untouched — goes to your existing parse_csv/classify_csv_rows.
+Otherwise (parses as a table, but wrong columns, or ragged) → semi_structured, flattened row-by-row into text.
+Lines 74–83: fallback for whatever's left
+Anything that's neither valid JSON nor a delimited table lands here. It counts lines that look like key: value or key = value and are under 200 chars. If more than 60% of lines match that shape → semi_structured (e.g. log files, key-value dumps) — content passed through unchanged since it's already readable. Otherwise → unstructured (prose reports) — also unchanged.
+
+Lines 97–107: _flatten_json_to_text
+Wraps a single dict into a one-item list so both {...} and [{...}, {...}] are handled the same way. For each record, joins key: value pairs (skipping empty/None values) into one line; blank line between records so split_text_into_chunks in your existing import_module.py treats each record as its own chunk for extraction.
+
+Lines 110–117: _flatten_rows_to_text
+Same idea for CSV rows: header, *data_rows = rows splits off the header row, then zips each data row against the header to build col_name: value pairs, skipping blank cells.
+
+Test cases (run against the actual module)
+1. Structured entity CSV — matches schema exactly
+Input: "id,type,name\nP1,Person,Rakesh Verma\nP2,Person,Anita Rao"
+→ bucket="structured", effective_type="csv", content unchanged. Goes to parse_csv → deterministic path, no AI touches it.
+
+2. Structured JSON
+Input: '{"entities": [{"id":"P1","type":"Person","name":"X"}], "relationships": []}'
+→ bucket="structured", effective_type="json". Has the entities key, so it's routed to parse_json directly.
+
+3. Semi-structured CSV — valid table, wrong column names
+Input: "full_name,mobile,city\nRakesh Verma,9876543210,Ahmedabad\nAnita Rao,9123456789,Mumbai"
+→ bucket="semi_structured", effective_type="text", content becomes:
+
+full_name: Rakesh Verma, mobile: 9876543210, city: Ahmedabad
+
+full_name: Anita Rao, mobile: 9123456789, city: Mumbai
+This is what previously would've thrown ImportValidationError — now it flows into your AI extraction pipeline instead of hard-failing.
+
+4. Semi-structured JSON — arbitrary shape
+Input: '[{"name": "Rakesh Verma", "phone": "9876543210"}, {"name": "Anita Rao", "phone": "9123456789"}]'
+→ bucket="semi_structured", flattened to "name: Rakesh Verma, phone: 9876543210\n\nname: Anita Rao, phone: 9123456789".
+
+5. Unstructured free text — an actual field report
+Input: "On the night of March 3rd, Rakesh Verma was seen meeting Anita Rao at the Riverside Cafe. Verma called 9876543210 twice before the meeting."
+→ bucket="unstructured", effective_type="text", content unchanged — goes straight into your existing regex pre-pass + LLM extraction.
+
+Bonus (6th) — key:value log lines
+Input: "name: Rakesh Verma, phone: 9876543210\nname: Anita Rao, phone: 9123456789"
+→ bucket="semi_structured" (the >60% kv-line heuristic fires) even though it never touched the CSV/JSON parsers.
+
+All six were run for real in the sandbox against app/data_classifier.py directly (no mocking) and asserted correct — output was:
+
+structured entity csv -> structured csv
+structured rel csv -> structured csv
+structured json -> structured json
+semi-structured csv -> semi_structured text
+semi-structured json -> semi_structured text
+unstructured text -> unstructured text
+kv log lines -> semi_structured text
+empty -> unstructured text
+ALL TESTS PASSED
+The two-line wiring in pipeline.py
+python
+if request.type is None:
+    result = classify_and_normalize(request.content)
+    detected_bucket = result.bucket
+    request = request.model_copy(update={"type": result.effective_type, "content": result.content})
+If the caller doesn't send type, classify the raw content, then rewrite request in place with the resolved type and (possibly flattened) content — everything below this in run_import (your original if request.type == "csv": ... etc.) runs completely unchanged, because by this point request.type is always one of csv/json/text.
+
