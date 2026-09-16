@@ -284,20 +284,20 @@ curl http://127.0.0.1:8000/api/graph/entity/e1
 # 7. Clear memory to empty state
 curl -X POST http://127.0.0.1:8000/api/graph/clear
 
-# 8. Upload structured entities
-curl -X POST http://127.0.0.1:8000/api/import/file -F "file=@testing/01_entities.csv"
+# 8. Upload structured syndicate dataset (CSV)
+curl -X POST http://127.0.0.1:8000/api/import/file -F "file=@testing/01_structured_syndicate.csv"
 
-# 9. Upload structured relationships
-curl -X POST http://127.0.0.1:8000/api/import/file -F "file=@testing/02_relationships.csv"
-
-# 10. Re-verify graph connectivity
+# 9. Re-verify graph connectivity and edge attributes
 curl http://127.0.0.1:8000/api/graph
 
-# 11. Upload multi-entity JSON case
-curl -X POST http://127.0.0.1:8000/api/import/file -F "file=@testing/03_combined_case.json"
+# 10. Upload semi-structured network dataset (JSON)
+curl -X POST http://127.0.0.1:8000/api/import/file -F "file=@testing/02_semistructured_network.json"
 
-# 12. Upload unstructured surveillance brief (Groq NER)
-curl -X POST http://127.0.0.1:8000/api/import/file -F "file=@testing/04_unstructured_case.txt"
+# 11. Upload unstructured surveillance brief (TXT - AI/Heuristic NER)
+curl -X POST http://127.0.0.1:8000/api/import/file -F "file=@testing/03_unstructured_case_report.txt"
+
+# 12. Upload multi-vector tactical intercept logs (LOG)
+curl -X POST http://127.0.0.1:8000/api/import/file -F "file=@testing/04_multivector_intercepts.log"
 
 # 13. Generate plain-English AI investigation summary
 curl http://127.0.0.1:8000/api/graph/summary
@@ -308,16 +308,29 @@ curl "http://127.0.0.1:8000/api/audit/trail?limit=10"
 
 ---
 
+## The 4 Comprehensive Test Datasets (`V2/testing/`)
+
+The testing suite contains exactly 4 deep, multi-vector datasets covering all formats, schemas, and investigative operational dimensions:
+
+| File | Format | Classification | Description & Coverage |
+| :--- | :--- | :--- | :--- |
+| **`01_structured_syndicate.csv`** | `.csv` | `structured` | Full tabular syndicate schema with dual entity & relationship support, Hawala transfers (`₹ 19.95 Cr`), CDR telecom pings (towers, duration), ANPR sightings, and cell cliques. |
+| **`02_semistructured_network.json`** | `.json` | `structured` / `semi_structured` | Hierarchical JSON case containing complete node and edge attributes, Hawala layering paths, burner IMEIs, and multi-event co-occurrences. |
+| **`03_unstructured_case_report.txt`** | `.txt` | `unstructured` | High-density narrative police intelligence dossier (`OPERATION FALCON SHADOW`) with suspects, corporate fronts, Port of Nhava Sheva drops, and bribery. |
+| **`04_multivector_intercepts.log`** | `.log` | `semi_structured` / `text` | Tactical intercept event stream containing automated ANPR plate hits, CDR call logs, wiretaps, and Hawala recovery chits. |
+
+---
+
 ## Troubleshooting & Diagnostic FAQ
 
 ### 1. `AI summary is unavailable right now`
 - **Cause**: Invalid or expired `GROQ_API_KEY`, or model rate limit reached.
-- **Remedy**: Verify your API key at [console.groq.com](https://console.groq.com/). The deterministic graph core (centrality, patterns, graph store) continues to function normally even if the AI summary is unavailable.
+- **Remedy**: Verify your API key at [console.groq.com](https://console.groq.com/). The deterministic graph core (centrality, patterns, graph store, fallback extraction) continues to function normally even if the AI summary is unavailable.
 
 ### 2. `Rejected structured relationship - unconfirmed entity`
 - **Cause**: A relationship row referenced a `source` or `target` ID that was not previously imported into the entity registry.
-- **Remedy**: Import the entities file (`01_entities.csv`) before importing the relationships file (`02_relationships.csv`), or ensure names/aliases match.
+- **Remedy**: Ensure the entity records are included in the same file or imported prior to the relationships.
 
 ### 3. `Nodes > 0, Links == 0`
 - **Cause**: Entities have been imported, but no relationship records have been supplied yet.
-- **Remedy**: Import `02_relationships.csv` or upload a combined JSON dataset (`03_combined_case.json` or `10_syndicate_black_lotus.json`).
+- **Remedy**: Import `01_structured_syndicate.csv` or `02_semistructured_network.json`.

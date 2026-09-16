@@ -77,9 +77,35 @@ def classify_csv_rows(rows: List[dict]) -> Tuple[List[dict], List[dict]]:
         norm_rows.append(norm_r)
 
     columns = set(norm_rows[0].keys())
-    if {"id", "type", "name"}.issubset(columns):
+    has_ent_cols = {"id", "type", "name"}.issubset(columns)
+    has_rel_cols = {"source", "target", "relation_type"}.issubset(columns)
+
+    # Support combined CSV files containing both entity and relationship specifications
+    if has_ent_cols and has_rel_cols:
+        entity_rows = []
+        relationship_rows = []
+        for r in norm_rows:
+            rec_type = r.get("record_type", "").strip().lower()
+            has_valid_rel = bool(r.get("source") and r.get("target") and r.get("relation_type"))
+            has_valid_ent = bool(r.get("id") and r.get("type") and r.get("name"))
+
+            if rec_type in ("relationship", "rel", "edge", "link") or (has_valid_rel and not has_valid_ent):
+                relationship_rows.append(r)
+            elif rec_type in ("entity", "ent", "node", "vertex") or (has_valid_ent and not has_valid_rel):
+                entity_rows.append(r)
+            elif has_valid_ent and has_valid_rel:
+                entity_rows.append(r)
+                relationship_rows.append(r)
+            elif has_valid_ent:
+                entity_rows.append(r)
+            elif has_valid_rel:
+                relationship_rows.append(r)
+
+        return entity_rows, relationship_rows
+
+    if has_ent_cols:
         return norm_rows, []
-    if {"source", "target", "relation_type"}.issubset(columns):
+    if has_rel_cols:
         return [], norm_rows
     raise ImportValidationError(
         f"CSV columns {sorted(columns)} do not match either the entity schema "

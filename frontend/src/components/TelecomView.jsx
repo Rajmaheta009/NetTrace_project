@@ -35,8 +35,8 @@ export default function TelecomView({
       phoneMap.set(node.name || node.id, {
         id: node.id,
         number: node.name || node.id,
-        carrier: node.attributes?.carrier || 'Encrypted VoIP / Cellular',
-        imei: node.attributes?.imei || '864291048291034',
+        carrier: node.attributes?.carrier || 'Cellular / VoIP Gateway',
+        imei: node.attributes?.imei || 'Not Disclosed',
         type: 'PhoneNumber',
         nodeRef: node,
         linkedPersons: [],
@@ -54,8 +54,8 @@ export default function TelecomView({
           phoneMap.set(phoneAttr, {
             id: person.id,
             number: phoneAttr,
-            carrier: phoneAttr.startsWith('+971') ? 'Etisalat UAE / Encrypted VoIP' : 'Airtel / Vi India',
-            imei: '358920194810294',
+            carrier: person.attributes?.carrier || (phoneAttr.startsWith('+') ? 'International Gateway' : 'Cellular Carrier'),
+            imei: person.attributes?.imei || 'Not Disclosed',
             type: 'Attribute',
             nodeRef: person,
             linkedPersons: [],
@@ -73,8 +73,10 @@ export default function TelecomView({
 
     // 3. Connect relationships touching phones or CALLED relationships
     links.forEach(link => {
-      const sourceNode = nodes.find(n => n.id === link.source);
-      const targetNode = nodes.find(n => n.id === link.target);
+      const sId = typeof link.source === 'object' && link.source !== null ? link.source.id : link.source;
+      const tId = typeof link.target === 'object' && link.target !== null ? link.target.id : link.target;
+      const sourceNode = nodes.find(n => n.id === sId);
+      const targetNode = nodes.find(n => n.id === tId);
 
       if (sourceNode && targetNode) {
         if (targetNode.type === 'PhoneNumber' && phoneMap.has(targetNode.name || targetNode.id)) {
@@ -129,22 +131,34 @@ export default function TelecomView({
   const cdrLogs = useMemo(() => {
     const list = [];
     
-    links.filter(l => l.relation_type === 'CALLED').forEach((link, idx) => {
-      const src = nodes.find(n => n.id === link.source);
-      const tgt = nodes.find(n => n.id === link.target);
+    links.filter(l => (l.relation_type || '').toUpperCase() === 'CALLED').forEach((link, idx) => {
+      const sId = typeof link.source === 'object' && link.source !== null ? link.source.id : link.source;
+      const tId = typeof link.target === 'object' && link.target !== null ? link.target.id : link.target;
+      const src = nodes.find(n => n.id === sId);
+      const tgt = nodes.find(n => n.id === tId);
       if (src && tgt) {
+        const durationMatch = (link.evidence?.[0] || '').match(/\d+m\s*\d*s?/i);
+        const durationStr = link.attributes?.duration || (durationMatch ? durationMatch[0] : 'Recorded Call');
+        
+        // Dynamic cell tower resolution from attributes or linked location
+        const towerName = link.attributes?.tower 
+          || link.attributes?.bts 
+          || link.attributes?.location
+          || (nodes.find(n => n.type === 'Location' && (n.id === tId || n.id === sId))?.name)
+          || (link.evidence?.[0]?.includes('Bandra') ? 'Bandra West BTS-09' : (link.evidence?.[0]?.includes('Port') ? 'Nhava Sheva Port BTS-14' : null));
+
         list.push({
           id: `cdr_${idx + 1}`,
           caller: src,
           receiver: tgt,
-          callerPhone: src.attributes?.phone || 'Unknown Caller ID',
-          receiverPhone: tgt.attributes?.phone || 'Unknown Callee ID',
-          duration: '3m 42s',
-          status: 'RECORDED_AUDIO',
+          callerPhone: src.attributes?.phone || src.name || src.id,
+          receiverPhone: tgt.attributes?.phone || tgt.name || tgt.id,
+          duration: durationStr,
+          status: link.attributes?.status || 'RECORDED_AUDIO',
           eventId: link.event_id || `ev_cdr_${idx + 1}`,
           evidence: link.evidence?.[0] || 'Lawful intercept audio transcript logged',
-          timestamp: '2026-03-12 14:28:10 UTC',
-          tower: 'Bandra West BTS-09',
+          timestamp: link.attributes?.timestamp || (link.event_id ? `Event: ${link.event_id}` : 'Logged Call'),
+          tower: towerName,
         });
       }
     });
@@ -153,18 +167,26 @@ export default function TelecomView({
       const src = nodes.find(n => n.id === link.source);
       const tgt = nodes.find(n => n.id === link.target);
       if (src && tgt && !list.some(c => c.eventId === link.event_id)) {
+        const durationMatch = (link.evidence?.[0] || '').match(/\d+m\s*\d*s?/i);
+        const durationStr = link.attributes?.duration || (durationMatch ? durationMatch[0] : 'Wiretap Intercept');
+        const towerName = link.attributes?.tower 
+          || link.attributes?.bts 
+          || link.attributes?.location
+          || (nodes.find(n => n.type === 'Location' && (n.id === link.target || n.id === link.source))?.name)
+          || null;
+
         list.push({
           id: `cdr_wire_${idx + 10}`,
           caller: src,
           receiver: tgt,
-          callerPhone: src.attributes?.phone || '+91-9876543210',
-          receiverPhone: tgt.attributes?.phone || '+971-50-1122334',
-          duration: '5m 18s',
-          status: 'ACTIVE_WIRETAP',
+          callerPhone: src.attributes?.phone || src.name || src.id,
+          receiverPhone: tgt.attributes?.phone || tgt.name || tgt.id,
+          duration: durationStr,
+          status: link.attributes?.status || 'ACTIVE_WIRETAP',
           eventId: link.event_id || `ev_wire_${idx + 1}`,
           evidence: link.evidence?.[0] || 'Intercepted tactical call snippet',
-          timestamp: '2026-03-13 18:44:00 UTC',
-          tower: 'Nhava Sheva Port BTS-14',
+          timestamp: link.attributes?.timestamp || (link.event_id ? `Event: ${link.event_id}` : 'Intercept Record'),
+          tower: towerName,
         });
       }
     });

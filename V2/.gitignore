@@ -57,6 +57,7 @@ V2/frontend
 logs/
 */logs/
 *.log
+!testing/*.log
 tmp/
 temp/
 

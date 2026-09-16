@@ -31,12 +31,14 @@ export default function TimelineView({
         };
       }
 
-      const srcNode = nodes.find(n => n.id === link.source);
-      const tgtNode = nodes.find(n => n.id === link.target);
+      const sId = typeof link.source === 'object' && link.source !== null ? link.source.id : link.source;
+      const tId = typeof link.target === 'object' && link.target !== null ? link.target.id : link.target;
+      const srcNode = nodes.find(n => n.id === sId);
+      const tgtNode = nodes.find(n => n.id === tId);
 
       eventMap[eid].connections.push({
-        source: srcNode || { id: link.source, name: link.source },
-        target: tgtNode || { id: link.target, name: link.target },
+        source: srcNode || { id: sId, name: sId },
+        target: tgtNode || { id: tId, name: tId },
         relation_type: link.relation_type,
       });
 

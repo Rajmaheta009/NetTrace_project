@@ -1,5 +1,0 @@
-source,target,relation_type,evidence
-e1,e2,KNOWS,Rakesh Verma knows Sanjay Patel.
-e1,e3,OWNS_VEHICLE,Rakesh Verma owns MH-04-AB-1234.
-e1,e4,MET_AT,Rakesh Verma met Sanjay Patel at Cafe Coastal Mumbai.
-e5,e6,MEMBER_OF,Anita Rao is associated with Coastal Traders Pvt Ltd.

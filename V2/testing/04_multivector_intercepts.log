@@ -1,0 +1,77 @@
+# =====================================================================
+# TACTICAL INTERCEPT LOG - TASK FORCE NETTRACE
+# CLASSIFICATION: RESTRICTED INVESTIGATIVE TELEMETRY
+# INTERCEPT TYPE: MULTI-VECTOR (ANPR, CDR, BTS, HAWALA, WIRETAP)
+# =====================================================================
+
+[2026-03-12 08:30:14] [ANPR_CAMERA_04] [LOCATION: Sea-Link-South-Toll]
+VEHICLE_PLATE: MH-01-CZ-9999
+MAKE_MODEL: Black Armored Fortuner
+DRIVER_IDENTIFIED: Sanjay 'Kabir' Patel
+CO_PASSENGER: Vikram 'Ghost' Singhania
+SPEED_RECORDED: 74 km/h
+STATUS: SIGHTING_CONFIRMED
+
+[2026-03-12 09:15:22] [WIRETAP_AUDIO_INTERCEPT] [CIRCUIT: SAT-9901-ENC]
+CALLER: Vikram 'Ghost' Singhania
+TERMINAL: +91-98765-43210
+RECEIVER: Rajesh Shrestha
+RECEIVER_TERMINAL: +971-50-1122334
+TOWER_SECTOR: BTS-South-Mumbai-04
+DURATION: 14m 20s
+TRANSCRIPT_EXCERPT: "Rajesh, the maritime consignment has docked at Nhava Sheva. Wire the ₹ 19.95 Cr hawala settlement clearance through Al-Zahra Global Trading LLC today."
+EVENT_ID: ev_wire_01
+
+[2026-03-12 11:30:05] [CDR_TELECOM_LOG] [CARRIER: Jio LTE]
+CALLER_SUSPECT: Sanjay 'Kabir' Patel (+91-98765-43210)
+RECEIVER_SUSPECT: Imran 'Chhota' Khan (+91-98765-00111)
+CALL_DURATION: 4m 45s
+BTS_CELL_TOWER: BTS-NhavaSheva-Port-02
+EVENT_TYPE: TACTICAL_DISPATCH
+SUMMARY: Sanjay instructs Imran to mobilize armed escort Scorpio MH-04-AB-1234.
+
+[2026-03-12 16:45:10] [ANPR_CAMERA_12] [LOCATION: Airoli-Toll-Plaza]
+VEHICLE_PLATE: MH-01-CZ-9999
+MAKE_MODEL: Black Armored Fortuner
+DRIVER_IDENTIFIED: Imran 'Chhota' Khan
+PREVIOUS_OPERATOR: Sanjay 'Kabir' Patel
+ANOMALY_FLAG: SHARED_VEHICLE_RESOURCE_DETECTED
+EVENT_ID: ev_anpr_02
+
+[2026-03-13 14:00:00] [FINANCIAL_INTELLIGENCE_UNIT] [CHIT_RECOVERY]
+DOCUMENT_TYPE: Hawala Cash Chit #HWL-9921
+REMITTER: Rajesh Shrestha (Managing Partner, Al-Zahra Global Trading LLC)
+COURIER_MULE: Zubair Ahmed
+BENEFICIARY_ENTITY: Silverline Import Export Pvt Ltd
+AMOUNT: ₹ 12.5 Cr
+CURRENCY: INR Cash
+BANKING_CONDUIT: Commercial Account Structuring
+EVENT_ID: ev_hawala_drop
+
+[2026-03-13 16:30:45] [PHYSICAL_SURVEILLANCE_OP] [SECTOR: JNPT]
+LOCATION: Dock 14 Nhava Sheva Port
+SUSPECT_OBSERVED: Devendra 'Dev' Joshi (Port Customs Appraiser)
+FACILITY_TYPE: Container Freight Station Gate 3
+FACILITY_LEASEHOLDER: Coastal Shipping & Maritime Logistics
+INCIDENT: Sanjay 'Kabir' Patel arrived on site; passed bribe envelope to Devendra Joshi to clear unmanifested freight.
+
+[2026-03-13 22:15:00] [PORT_GATE_DISPATCH] [SECTOR: JNPT-OUTBOUND]
+CARGO_TRUCK: GJ-01-XX-5500 (Eicher Heavy Freight)
+DRIVER: Tariq Mansoor (+91-98765-00222)
+ESCORT_VEHICLE: MH-04-AB-1234 (Imran 'Chhota' Khan)
+MANIFEST_DECLARED: Industrial Machine Spare Parts
+DESTINATION_SITE: Warehouse 3A Bhiwandi Logistics Hub
+EVENT_ID: ev_cargo_drop
+
+[2026-03-14 02:45:00] [TACTICAL_SURVEILLANCE_POST] [BHIWANDI]
+LOCATION: Warehouse 3A Bhiwandi Logistics Hub
+SUSPECTS_PRESENT: Sanjay 'Kabir' Patel, Imran 'Chhota' Khan, Tariq Mansoor
+ACTIVITY: Offloading 18 metric tons of contraband into secure storage bay
+PATTERN_TRIGGER: HIGH_DENSITY_OPERATING_TRIANGLE
+SECURITY_GRADE: Armed Watchmen & Industrial CCTV
+
+[2026-03-14 21:00:00] [FIELD_OBSERVATION] [BANDRA]
+LOCATION: Penthouse 7B Bandra West
+SUSPECTS_LOGGED: Vikram 'Ghost' Singhania, Rajesh Shrestha
+MEETING_PURPOSE: Financial damage-control and bullion liquidation with Apex Bullion & Precious Metals FZE
+EVENT_ID: ev_safehouse_raid

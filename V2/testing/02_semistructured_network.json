@@ -1,0 +1,738 @@
+{
+  "case_code": "OP-BLACK-LOTUS-V2",
+  "classification": "TOP SECRET // INVESTIGATIVE INTELLIGENCE",
+  "entities": [
+    {
+      "id": "p201",
+      "type": "Person",
+      "name": "Vikram 'Ghost' Singhania",
+      "aliases": [
+        "Ghost",
+        "VK Singhania",
+        "Elder Brother"
+      ],
+      "attributes": {
+        "role": "Syndicate Kingpin & Strategic Broker",
+        "phone": "+91-98765-43210",
+        "imei": "354928091234567",
+        "risk_rating": "CRITICAL",
+        "citizenship": "Indian / St Kitts Passport Holder"
+      }
+    },
+    {
+      "id": "p202",
+      "type": "Person",
+      "name": "Rajesh Shrestha",
+      "aliases": [
+        "The Banker",
+        "Kathmandu Raju"
+      ],
+      "attributes": {
+        "role": "Hawala Mastermind & Offshore Conduit",
+        "phone": "+971-50-1122334",
+        "imei": "864192041239845",
+        "risk_rating": "HIGH",
+        "residence": "Dubai Marina UAE"
+      }
+    },
+    {
+      "id": "p203",
+      "type": "Person",
+      "name": "Anita Rao",
+      "aliases": [
+        "Chartered Anita",
+        "Madam Comptroller"
+      ],
+      "attributes": {
+        "role": "Corporate Shell Comptroller & Auditor",
+        "phone": "+91-91234-56789",
+        "imei": "359012051284711",
+        "risk_rating": "EVALUATED",
+        "profession": "Chartered Accountant & Nominee Director"
+      }
+    },
+    {
+      "id": "p204",
+      "type": "Person",
+      "name": "Sanjay 'Kabir' Patel",
+      "aliases": [
+        "Kabir Bhai",
+        "Operations Chief"
+      ],
+      "attributes": {
+        "role": "Maritime Narcotics Logistics Lead",
+        "phone": "+91-98765-43210",
+        "imei": "354928091234567",
+        "risk_rating": "CRITICAL",
+        "operating_territory": "Gujarat & Maharashtra Maritime Arc"
+      }
+    },
+    {
+      "id": "p205",
+      "type": "Person",
+      "name": "Imran 'Chhota' Khan",
+      "aliases": [
+        "Chhota Imran",
+        "Trigger"
+      ],
+      "attributes": {
+        "role": "Syndicate Chief Enforcer & Tactical Lead",
+        "phone": "+91-98765-00111",
+        "imei": "862198031238411",
+        "risk_rating": "HIGH",
+        "firearm_license": "Counterfeit All-India Permit"
+      }
+    },
+    {
+      "id": "p206",
+      "type": "Person",
+      "name": "Tariq Mansoor",
+      "aliases": [
+        "Tariq Driver",
+        "The Transporter"
+      ],
+      "attributes": {
+        "role": "Safehouse Custodian & Cargo Transporter",
+        "phone": "+91-98765-00222",
+        "imei": "351289061299312",
+        "risk_rating": "EVALUATED",
+        "operating_base": "Thane & Bhiwandi Logistics Belt"
+      }
+    },
+    {
+      "id": "p207",
+      "type": "Person",
+      "name": "Devendra 'Dev' Joshi",
+      "aliases": [
+        "Dev Inspector",
+        "Customs Joshi"
+      ],
+      "attributes": {
+        "role": "Port Customs Clearance Facilitator",
+        "phone": "+91-98200-11223",
+        "risk_rating": "CORRUPT_PUBLIC_OFFICIAL",
+        "position": "Appraiser Grade II Nhava Sheva"
+      }
+    },
+    {
+      "id": "p208",
+      "type": "Person",
+      "name": "Zubair Ahmed",
+      "aliases": [
+        "Zubair Courier",
+        "Cash Runner"
+      ],
+      "attributes": {
+        "role": "Hawala Cash Courier & Physical Mule",
+        "phone": "+91-98333-77889",
+        "risk_rating": "FIELD_OPERATIVE",
+        "specialization": "Zaveri Bazaar Cash Pickups"
+      }
+    },
+    {
+      "id": "org201",
+      "type": "Organization",
+      "name": "Al-Zahra Global Trading LLC",
+      "aliases": [
+        "Al-Zahra Dubai",
+        "AZGT Holdings"
+      ],
+      "attributes": {
+        "category": "Hawala Clearing Front",
+        "jurisdiction": "Dubai / UAE Deira Free Zone",
+        "registration_no": "DXB-COMM-991204",
+        "annual_turnover": "$48,000,000"
+      }
+    },
+    {
+      "id": "org202",
+      "type": "Organization",
+      "name": "Coastal Shipping & Maritime Logistics",
+      "aliases": [
+        "Coastal Maritime Panama",
+        "CSML Lines"
+      ],
+      "attributes": {
+        "category": "Maritime Smuggling Conduit",
+        "jurisdiction": "Panama Maritime Authority",
+        "vessels_owned": "3 Feeder Container Ships"
+      }
+    },
+    {
+      "id": "org203",
+      "type": "Organization",
+      "name": "Apex Bullion & Precious Metals FZE",
+      "aliases": [
+        "Apex Gold Sharjah"
+      ],
+      "attributes": {
+        "category": "Precious Metals Layering Front",
+        "jurisdiction": "Sharjah Airport International Free Zone (SAIF)",
+        "gold_import_license": "SAIF-AU-88912"
+      }
+    },
+    {
+      "id": "org204",
+      "type": "Organization",
+      "name": "Silverline Import Export Pvt Ltd",
+      "aliases": [
+        "Silverline Mumbai"
+      ],
+      "attributes": {
+        "category": "Domestic Hawala Shell Conduit",
+        "jurisdiction": "Registrar of Companies Mumbai India",
+        "registered_office": "Nariman Point Business Chambers"
+      }
+    },
+    {
+      "id": "v201",
+      "type": "Vehicle",
+      "name": "MH-01-CZ-9999",
+      "aliases": [
+        "Black Fortuner"
+      ],
+      "attributes": {
+        "model": "Toyota Fortuner Legender Armored",
+        "color": "Midnight Black",
+        "plate": "MH-01-CZ-9999",
+        "surveillance_tag": "TARGET_PRIMARY_MOBILITY"
+      }
+    },
+    {
+      "id": "v202",
+      "type": "Vehicle",
+      "name": "MH-04-AB-1234",
+      "aliases": [
+        "Grey Scorpio"
+      ],
+      "attributes": {
+        "model": "Mahindra Scorpio-N 4x4",
+        "color": "Battleship Grey",
+        "plate": "MH-04-AB-1234",
+        "surveillance_tag": "TACTICAL_ESCORT"
+      }
+    },
+    {
+      "id": "v203",
+      "type": "Vehicle",
+      "name": "GJ-01-XX-5500",
+      "aliases": [
+        "Eicher Container Truck"
+      ],
+      "attributes": {
+        "model": "Eicher Pro 3019 Heavy Freight Truck",
+        "color": "Industrial Blue",
+        "plate": "GJ-01-XX-5500",
+        "cargo_capacity": "18 Metric Tons"
+      }
+    },
+    {
+      "id": "loc201",
+      "type": "Location",
+      "name": "Dock 14 Nhava Sheva Port",
+      "aliases": [
+        "JNPT Berth 14",
+        "Nhava Sheva CFS"
+      ],
+      "attributes": {
+        "facility_type": "Container Freight Station & Customs Terminal",
+        "security": "Port Perimeter Access Gate 3",
+        "coordinates": "18.9500 N, 72.9500 E"
+      }
+    },
+    {
+      "id": "loc202",
+      "type": "Location",
+      "name": "Penthouse 7B Bandra West",
+      "aliases": [
+        "The Bandra Safehouse",
+        "Sky Suite 7B"
+      ],
+      "attributes": {
+        "facility_type": "Executive Clandestine Safehouse",
+        "security": "Biometric Access & Private Elevator",
+        "surveillance": "Undercover Federal Surveillance Op"
+      }
+    },
+    {
+      "id": "loc203",
+      "type": "Location",
+      "name": "Cafe Coastal Marine Drive Mumbai",
+      "aliases": [
+        "Cafe Coastal Cabin 4"
+      ],
+      "attributes": {
+        "facility_type": "Covert Meeting Site",
+        "security": "CCTV Monitored Perimeter",
+        "seating": "Sound-isolated Private Mezzanine"
+      }
+    },
+    {
+      "id": "loc204",
+      "type": "Location",
+      "name": "Warehouse 3A Bhiwandi Logistics Hub",
+      "aliases": [
+        "Depot 3A Thane"
+      ],
+      "attributes": {
+        "facility_type": "Contraband Offload & Staging Depot",
+        "security": "Barbed Wire Perimeter & Armed Guard Post",
+        "capacity": "45,000 sq ft"
+      }
+    },
+    {
+      "id": "ph201",
+      "type": "PhoneNumber",
+      "name": "+91-98765-43210",
+      "attributes": {
+        "phone": "+91-98765-43210",
+        "carrier": "Airtel Satellite High-Encryption",
+        "imei": "354928091234567",
+        "service_status": "MONITORED_WIRETAP"
+      }
+    },
+    {
+      "id": "ph202",
+      "type": "PhoneNumber",
+      "name": "+971-50-1122334",
+      "attributes": {
+        "phone": "+971-50-1122334",
+        "carrier": "Etisalat UAE International Gateway",
+        "imei": "864192041239845",
+        "service_status": "INTERPOL_CDR_INTERCEPT"
+      }
+    },
+    {
+      "id": "ph203",
+      "type": "PhoneNumber",
+      "name": "+91-91234-56789",
+      "attributes": {
+        "phone": "+91-91234-56789",
+        "carrier": "Jio Corporate Enterprise Gateway",
+        "imei": "359012051284711",
+        "service_status": "ACTIVE_CELLULAR"
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "source": "p201",
+      "target": "p202",
+      "relation_type": "KNOWS",
+      "weight": 5,
+      "event_id": "ev_wire_01",
+      "evidence": [
+        "Intercepted encrypted satellite phone line connecting Vikram Singhania with Rajesh Shrestha regarding $2.5M Hawala clearance"
+      ],
+      "attributes": {
+        "amount": "\u20b9 19.95 Cr",
+        "currency": "INR",
+        "method": "Hawala Settlement Clearance",
+        "timestamp": "2026-03-12 09:15"
+      }
+    },
+    {
+      "source": "p202",
+      "target": "org201",
+      "relation_type": "MEMBER_OF",
+      "weight": 4,
+      "event_id": "ev_corp_201",
+      "evidence": [
+        "Dubai Commercial Registry lists Rajesh Shrestha as 49% equity shareholder and Managing Director of Al-Zahra Global Trading LLC"
+      ],
+      "attributes": {
+        "role": "Managing Director",
+        "ownership_share": "49%"
+      }
+    },
+    {
+      "source": "p203",
+      "target": "org201",
+      "relation_type": "MEMBER_OF",
+      "weight": 3,
+      "event_id": "ev_corp_202",
+      "evidence": [
+        "Anita Rao authorized foreign exchange remitter and corporate comptroller for Al-Zahra Global Trading LLC"
+      ],
+      "attributes": {
+        "role": "Authorized Foreign Exchange Signatory",
+        "banking_access": "Full Dual-Key Mandate"
+      }
+    },
+    {
+      "source": "p202",
+      "target": "p203",
+      "relation_type": "KNOWS",
+      "weight": 4,
+      "event_id": "ev_audit_201",
+      "evidence": [
+        "Hawala ledger reconciliations show Rajesh Shrestha directing Anita Rao on secondary bank accounts layering"
+      ],
+      "attributes": {
+        "amount": "\u20b9 11.2 Cr",
+        "channel": "Account Layering Scheme",
+        "timestamp": "2026-02-14 16:20"
+      }
+    },
+    {
+      "source": "p201",
+      "target": "p204",
+      "relation_type": "KNOWS",
+      "weight": 5,
+      "event_id": "ev_wire_01",
+      "evidence": [
+        "Vikram instructed Sanjay Patel regarding arrival timetable of container freight shipment at Nhava Sheva Port"
+      ],
+      "attributes": {
+        "duration": "14m 20s",
+        "tower": "BTS-South-Mumbai-04",
+        "timestamp": "2026-03-12 09:45"
+      }
+    },
+    {
+      "source": "p201",
+      "target": "loc202",
+      "relation_type": "LOCATED_AT",
+      "weight": 3,
+      "event_id": "ev_safehouse_raid",
+      "evidence": [
+        "Physical tactical surveillance confirmed Vikram entering Penthouse 7B Bandra West with encrypted laptops"
+      ],
+      "attributes": {
+        "timestamp": "2026-03-14 21:00"
+      }
+    },
+    {
+      "source": "p202",
+      "target": "loc202",
+      "relation_type": "LOCATED_AT",
+      "weight": 3,
+      "event_id": "ev_safehouse_raid",
+      "evidence": [
+        "Rajesh Shrestha photographed leaving Penthouse 7B Bandra West following 3-hour financial strategy session"
+      ],
+      "attributes": {
+        "timestamp": "2026-03-14 21:15"
+      }
+    },
+    {
+      "source": "p204",
+      "target": "p205",
+      "relation_type": "KNOWS",
+      "weight": 4,
+      "event_id": "ev_enforce_201",
+      "evidence": [
+        "Sanjay Patel ordered Imran Khan to mobilize armed escort squad for convoy departure"
+      ],
+      "attributes": {
+        "duration": "4m 45s",
+        "tower": "BTS-NhavaSheva-Port-02",
+        "timestamp": "2026-03-13 14:00"
+      }
+    },
+    {
+      "source": "p204",
+      "target": "p206",
+      "relation_type": "KNOWS",
+      "weight": 4,
+      "event_id": "ev_cargo_drop",
+      "evidence": [
+        "Sanjay Patel handed container route pass and gate slip to driver Tariq Mansoor"
+      ],
+      "attributes": {
+        "duration": "6m 10s",
+        "tower": "BTS-Bhiwandi-East-01",
+        "timestamp": "2026-03-13 18:30"
+      }
+    },
+    {
+      "source": "p205",
+      "target": "p206",
+      "relation_type": "KNOWS",
+      "weight": 4,
+      "event_id": "ev_cargo_drop",
+      "evidence": [
+        "Imran Khan and Tariq Mansoor observed together staging cargo transfer into logistics transport"
+      ],
+      "attributes": {
+        "duration": "3m 15s",
+        "tower": "BTS-Bandra-West-03",
+        "timestamp": "2026-03-13 19:15"
+      }
+    },
+    {
+      "source": "p204",
+      "target": "v201",
+      "relation_type": "OWNS_VEHICLE",
+      "weight": 3,
+      "event_id": "ev_anpr_201",
+      "evidence": [
+        "Automated License Plate Recognition logged Sanjay Patel driving Black Fortuner MH-01-CZ-9999"
+      ],
+      "attributes": {
+        "plate": "MH-01-CZ-9999",
+        "anpr_camera": "Bandra-Worli-SeaLink-Southbound",
+        "timestamp": "2026-03-11 08:30"
+      }
+    },
+    {
+      "source": "p205",
+      "target": "v201",
+      "relation_type": "OWNS_VEHICLE",
+      "weight": 3,
+      "event_id": "ev_anpr_202",
+      "evidence": [
+        "ANPR highway camera logged Imran Khan operating same Black Fortuner MH-01-CZ-9999 at Airoli Toll Plaza"
+      ],
+      "attributes": {
+        "plate": "MH-01-CZ-9999",
+        "anpr_camera": "Airoli-Toll-Plaza-Lane-04",
+        "timestamp": "2026-03-12 16:45"
+      }
+    },
+    {
+      "source": "p205",
+      "target": "v202",
+      "relation_type": "OWNS_VEHICLE",
+      "weight": 4,
+      "event_id": "ev_escort_201",
+      "evidence": [
+        "Regional Transport Office vehicle registry confirms Imran Khan as registered owner of Grey Scorpio MH-04-AB-1234"
+      ],
+      "attributes": {
+        "plate": "MH-04-AB-1234",
+        "rto_office": "Thane MH-04"
+      }
+    },
+    {
+      "source": "p206",
+      "target": "v203",
+      "relation_type": "OWNS_VEHICLE",
+      "weight": 4,
+      "event_id": "ev_truck_201",
+      "evidence": [
+        "Port security log shows Tariq Mansoor driving Heavy Freight Container Truck GJ-01-XX-5500 out of customs gate"
+      ],
+      "attributes": {
+        "plate": "GJ-01-XX-5500",
+        "weighbridge_slip": "WB-99014",
+        "timestamp": "2026-03-13 22:15"
+      }
+    },
+    {
+      "source": "p204",
+      "target": "loc201",
+      "relation_type": "MET_AT",
+      "weight": 3,
+      "event_id": "ev_dock_inspect",
+      "evidence": [
+        "CCTV feed captured Sanjay Patel inside Dock 14 Container Freight Station inspecting sealed container"
+      ],
+      "attributes": {
+        "timestamp": "2026-03-13 17:00"
+      }
+    },
+    {
+      "source": "p207",
+      "target": "loc201",
+      "relation_type": "LOCATED_AT",
+      "weight": 4,
+      "event_id": "ev_customs_clear",
+      "evidence": [
+        "Customs officer Devendra Joshi on-duty supervisor at Nhava Sheva Dock 14 customs bay"
+      ],
+      "attributes": {
+        "timestamp": "2026-03-13 16:30"
+      }
+    },
+    {
+      "source": "p204",
+      "target": "p207",
+      "relation_type": "KNOWS",
+      "weight": 3,
+      "event_id": "ev_bribe_clear",
+      "evidence": [
+        "Undercover surveillance recorded Sanjay Patel handing brown document envelope to Devendra Joshi outside gate"
+      ],
+      "attributes": {
+        "amount": "\u20b9 50 Lakhs",
+        "method": "Cash Bribery for Customs Bypass",
+        "timestamp": "2026-03-13 17:45"
+      }
+    },
+    {
+      "source": "org202",
+      "target": "loc201",
+      "relation_type": "LOCATED_AT",
+      "weight": 4,
+      "event_id": "ev_dock_lease",
+      "evidence": [
+        "Port Authority cargo manifest confirms Coastal Shipping & Maritime Logistics holds exclusive lease for Berth 14"
+      ]
+    },
+    {
+      "source": "p201",
+      "target": "loc203",
+      "relation_type": "MET_AT",
+      "weight": 4,
+      "event_id": "ev_covert_meet",
+      "evidence": [
+        "Surveillance log recorded Vikram Singhania entering Cafe Coastal Marine Drive private cabin"
+      ],
+      "attributes": {
+        "timestamp": "2026-03-08 19:30"
+      }
+    },
+    {
+      "source": "p204",
+      "target": "loc203",
+      "relation_type": "MET_AT",
+      "weight": 4,
+      "event_id": "ev_covert_meet",
+      "evidence": [
+        "Surveillance log recorded Sanjay Patel joining Vikram Singhania inside Cafe Coastal Marine Drive private cabin"
+      ],
+      "attributes": {
+        "timestamp": "2026-03-08 19:35"
+      }
+    },
+    {
+      "source": "p206",
+      "target": "loc204",
+      "relation_type": "LOCATED_AT",
+      "weight": 4,
+      "event_id": "ev_warehouse_drop",
+      "evidence": [
+        "CCTV recorded Tariq Mansoor offloading 12 shrink-wrapped pallets at Warehouse 3A Bhiwandi Logistics Hub"
+      ],
+      "attributes": {
+        "timestamp": "2026-03-14 02:30"
+      }
+    },
+    {
+      "source": "p205",
+      "target": "loc204",
+      "relation_type": "LOCATED_AT",
+      "weight": 4,
+      "event_id": "ev_warehouse_drop",
+      "evidence": [
+        "Tactical surveillance noted Imran Khan providing armed perimeter security at Warehouse 3A Bhiwandi Logistics Hub"
+      ],
+      "attributes": {
+        "timestamp": "2026-03-14 02:45"
+      }
+    },
+    {
+      "source": "p202",
+      "target": "p208",
+      "relation_type": "ASSOCIATED_WITH",
+      "weight": 5,
+      "event_id": "ev_hawala_drop",
+      "evidence": [
+        "Hawala ledger token #HWL-9921 confirms Rajesh Shrestha authorized cash handover to courier Zubair Ahmed"
+      ],
+      "attributes": {
+        "amount": "\u20b9 12.5 Cr",
+        "currency": "INR",
+        "method": "Physical Hawala Token Currency",
+        "timestamp": "2026-03-14 11:00"
+      }
+    },
+    {
+      "source": "p208",
+      "target": "org204",
+      "relation_type": "ASSOCIATED_WITH",
+      "weight": 4,
+      "event_id": "ev_cash_mule",
+      "evidence": [
+        "Bank teller CCTV captured Zubair Ahmed making cash deposits into Silverline Import Export Pvt Ltd business account"
+      ],
+      "attributes": {
+        "amount": "\u20b9 7.8 Cr",
+        "currency": "INR",
+        "method": "Structuring Bank Cash Deposits",
+        "timestamp": "2026-03-14 14:30"
+      }
+    },
+    {
+      "source": "p202",
+      "target": "org203",
+      "relation_type": "ASSOCIATED_WITH",
+      "weight": 5,
+      "event_id": "ev_bullion_trade",
+      "evidence": [
+        "Offshore wire settlement slip shows Rajesh Shrestha transferring Hawala liquidity into Apex Bullion & Precious Metals FZE"
+      ],
+      "attributes": {
+        "amount": "\u20b9 18.2 Cr",
+        "currency": "INR",
+        "method": "Bullion Layering & Gold Bar Consignments",
+        "timestamp": "2026-03-15 10:15"
+      }
+    },
+    {
+      "source": "p201",
+      "target": "p204",
+      "relation_type": "CALLED",
+      "weight": 4,
+      "event_id": "ev_wire_01",
+      "evidence": [
+        "Lawful interception recorded Vikram contacting Sanjay discussing contraband drop schedule"
+      ],
+      "attributes": {
+        "duration": "14m 20s",
+        "tower": "BTS-South-Mumbai-04",
+        "carrier": "Airtel 5G Encrypted",
+        "timestamp": "2026-03-12 10:15"
+      }
+    },
+    {
+      "source": "p204",
+      "target": "p205",
+      "relation_type": "CALLED",
+      "weight": 3,
+      "event_id": "ev_call_02",
+      "evidence": [
+        "CDR intercept recorded Sanjay placing priority call to Imran prior to convoy movement"
+      ],
+      "attributes": {
+        "duration": "4m 45s",
+        "tower": "BTS-NhavaSheva-Port-02",
+        "carrier": "Jio 4G LTE",
+        "timestamp": "2026-03-12 11:30"
+      }
+    },
+    {
+      "source": "p204",
+      "target": "p206",
+      "relation_type": "CALLED",
+      "weight": 3,
+      "event_id": "ev_call_03",
+      "evidence": [
+        "CDR intercept recorded Sanjay calling driver Tariq to confirm container dispatch route"
+      ],
+      "attributes": {
+        "duration": "6m 10s",
+        "tower": "BTS-Bhiwandi-East-01",
+        "carrier": "Vodafone-Idea Cellular",
+        "timestamp": "2026-03-12 12:40"
+      }
+    },
+    {
+      "source": "p205",
+      "target": "p206",
+      "relation_type": "CALLED",
+      "weight": 3,
+      "event_id": "ev_call_04",
+      "evidence": [
+        "Cellular CDR logged Imran checking in with Tariq as convoy entered Bhiwandi perimeter"
+      ],
+      "attributes": {
+        "duration": "3m 15s",
+        "tower": "BTS-Bandra-West-03",
+        "carrier": "Jio 4G LTE",
+        "timestamp": "2026-03-12 14:05"
+      }
+    }
+  ]
+}

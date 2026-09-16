@@ -92,9 +92,12 @@ def detect_shared_attribute_pattern(graph: nx.MultiGraph) -> List[PatternFlag]:
 
 
 def detect_dense_subgroup_pattern(graph: nx.MultiGraph) -> List[PatternFlag]:
-    """Small connected components with unusually high internal edge density (possible cell)."""
+    """Small connected components or tightly connected cliques with unusually high internal edge density (possible cell)."""
     flags: List[PatternFlag] = []
     simple_graph = nx.Graph(graph)
+    seen_groups = set()
+
+    # 1. Check isolated connected components
     for component in nx.connected_components(simple_graph):
         n = len(component)
         if n < DENSE_SUBGROUP_MIN_SIZE:
@@ -103,6 +106,8 @@ def detect_dense_subgroup_pattern(graph: nx.MultiGraph) -> List[PatternFlag]:
         max_edges = n * (n - 1) / 2
         density = subgraph.number_of_edges() / max_edges if max_edges else 0.0
         if density >= DENSE_SUBGROUP_DENSITY_THRESHOLD:
+            fkey = frozenset(component)
+            seen_groups.add(fkey)
             names = [graph.nodes.get(nid, {}).get("name", nid) for nid in component]
             flags.append(
                 PatternFlag(
@@ -115,6 +120,29 @@ def detect_dense_subgroup_pattern(graph: nx.MultiGraph) -> List[PatternFlag]:
                     severity="medium",
                 )
             )
+
+    # 2. Check maximal cliques of size >= DENSE_SUBGROUP_MIN_SIZE inside larger networks
+    try:
+        for clique in nx.find_cliques(simple_graph):
+            if len(clique) >= DENSE_SUBGROUP_MIN_SIZE:
+                fkey = frozenset(clique)
+                if fkey not in seen_groups:
+                    seen_groups.add(fkey)
+                    names = [graph.nodes.get(nid, {}).get("name", nid) for nid in clique]
+                    flags.append(
+                        PatternFlag(
+                            pattern_type="dense_subgroup",
+                            entities_involved=list(clique),
+                            evidence=(
+                                f"A tightly interconnected operating clique of {len(clique)} entities ({', '.join(names)}) "
+                                f"with edge density 1.0 - possible operating cell"
+                            ),
+                            severity="high",
+                        )
+                    )
+    except Exception:
+        pass
+
     return flags
 
 

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Navbar from './components/Navbar';
-import LiveTicker from './components/LiveTicker';
 import CommandHUD from './components/CommandHUD';
 import GraphView from './components/GraphView';
 import EntityDrawer from './components/EntityDrawer';
@@ -114,10 +113,16 @@ export default function App() {
       const node = (graphData.nodes || []).find(n => n.id === entityId);
       if (node) {
         const conns = (graphData.links || [])
-          .filter(l => l.source === entityId || l.target === entityId)
+          .filter(l => {
+            const sId = typeof l.source === 'object' ? l.source?.id : l.source;
+            const tId = typeof l.target === 'object' ? l.target?.id : l.target;
+            return sId === entityId || tId === entityId;
+          })
           .map(l => {
-            const isSource = l.source === entityId;
-            const neighborId = isSource ? l.target : l.source;
+            const sId = typeof l.source === 'object' ? l.source?.id : l.source;
+            const tId = typeof l.target === 'object' ? l.target?.id : l.target;
+            const isSource = sId === entityId;
+            const neighborId = isSource ? tId : sId;
             const neighborNode = (graphData.nodes || []).find(n => n.id === neighborId);
             return {
               entity_id: neighborId,
@@ -259,9 +264,6 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] flex flex-col antialiased transition-colors duration-300">
       
-      {/* Live Tactical Surveillance Intercept Stream Ticker */}
-      <LiveTicker />
-
       {/* Top Header & Navigation */}
       <Navbar
         activeTab={activeTab}

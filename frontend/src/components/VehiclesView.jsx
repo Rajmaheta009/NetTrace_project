@@ -32,7 +32,11 @@ export default function VehiclesView({
 
     return vehicleNodes.map(veh => {
       // Find all relationships touching this vehicle
-      const relatedLinks = links.filter(l => l.source === veh.id || l.target === veh.id);
+      const relatedLinks = links.filter(l => {
+        const sId = typeof l.source === 'object' && l.source !== null ? l.source.id : l.source;
+        const tId = typeof l.target === 'object' && l.target !== null ? l.target.id : l.target;
+        return sId === veh.id || tId === veh.id;
+      });
 
       // Extract drivers / owners (Person entities)
       const drivers = [];
@@ -40,7 +44,9 @@ export default function VehiclesView({
       const evidenceList = [];
 
       relatedLinks.forEach(link => {
-        const otherId = link.source === veh.id ? link.target : link.source;
+        const sId = typeof link.source === 'object' && link.source !== null ? link.source.id : link.source;
+        const tId = typeof link.target === 'object' && link.target !== null ? link.target.id : link.target;
+        const otherId = sId === veh.id ? tId : sId;
         const otherNode = nodes.find(n => n.id === otherId);
 
         if (otherNode) {
@@ -132,7 +138,9 @@ export default function VehiclesView({
           </div>
           <div>
             <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">Fleet Surveillance</span>
-            <span className="text-xs font-bold text-emerald-300 block mt-1">Live Intercept Active</span>
+            <span className={`text-xs font-bold block mt-1 ${vehicles.length > 0 ? 'text-emerald-300' : 'text-slate-500'}`}>
+              {vehicles.length > 0 ? 'Live Tracking Active' : 'No Fleet Monitored'}
+            </span>
           </div>
         </div>
 

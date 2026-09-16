@@ -86,17 +86,16 @@ frontend/
     │   ├── Navbar.jsx         # Header bar with counters, Reset buttons, & Spotlight trigger
     │   ├── GraphView.jsx      # High-performance 3D force-directed canvas with HUD controls
     │   ├── EntityDrawer.jsx   # Slide-out forensic dossier with 1-hop connections & evidence
-    │   ├── IngestPanel.jsx    # Multi-format data import hub
+    │   ├── IngestPanel.jsx    # Multi-format data import hub (CSV, JSON, TXT, LOG)
     │   ├── CentralityTable.jsx# Ranked actor table (Degree & Betweenness)
     │   ├── PatternsRadar.jsx  # Algorithmic pattern detection radar
     │   ├── SummaryView.jsx    # Groq AI investigation narrative & tactical action plan
-    │   ├── FinancialView.jsx  # Hawala & suspicious transaction tracking
-    │   ├── TelecomView.jsx    # CDR analysis & shared burner phone tracking
-    │   ├── VehiclesView.jsx   # Plate recognition & syndicate fleet tracking
-    │   ├── LocationsView.jsx  # Safehouse & meeting location tracking
-    │   ├── TimelineView.jsx   # Chronological operational timeline
-    │   ├── CommandHUD.jsx     # Global search palette (Ctrl+K)
-    │   └── LiveTicker.jsx     # Streaming event feed ticker
+    │   ├── FinancialView.jsx  # Dynamic Hawala & inter-entity fund flow tracking
+    │   ├── TelecomView.jsx    # Dynamic CDR logs & shared burner phone tracking
+    │   ├── VehiclesView.jsx   # Dynamic ANPR fleet tracking & co-travel anomalies
+    │   ├── LocationsView.jsx  # Dynamic safehouse, port terminal, & site surveillance
+    │   ├── TimelineView.jsx   # Dynamic chronological operational timeline
+    │   └── CommandHUD.jsx     # Global search palette (Ctrl+K)
     │
     ├── services/
     │   └── api.js             # Centralized Axios/fetch client for all backend endpoints

@@ -28,14 +28,20 @@ export default function LocationsView({
 
   const locations = useMemo(() => {
     return nodes.filter(n => n.type === 'Location').map(loc => {
-      const locLinks = links.filter(l => l.source === loc.id || l.target === loc.id);
+      const locLinks = links.filter(l => {
+        const sId = typeof l.source === 'object' && l.source !== null ? l.source.id : l.source;
+        const tId = typeof l.target === 'object' && l.target !== null ? l.target.id : l.target;
+        return sId === loc.id || tId === loc.id;
+      });
       
       const visitors = [];
       const vehicles = [];
       const evidence = [];
 
       locLinks.forEach(link => {
-        const otherId = link.source === loc.id ? link.target : link.source;
+        const sId = typeof link.source === 'object' && link.source !== null ? link.source.id : link.source;
+        const tId = typeof link.target === 'object' && link.target !== null ? link.target.id : link.target;
+        const otherId = sId === loc.id ? tId : sId;
         const otherNode = nodes.find(n => n.id === otherId);
         if (otherNode) {
           if (otherNode.type === 'Person') visitors.push(otherNode);
@@ -74,6 +80,18 @@ export default function LocationsView({
     });
   }, [locations, searchQuery, filterType]);
 
+  const safehouseCount = useMemo(() => {
+    return locations.filter(l => l.facilityType.toLowerCase().includes('safehouse')).length;
+  }, [locations]);
+
+  const securedCount = useMemo(() => {
+    return locations.filter(l => Boolean(l.attributes?.security || l.attributes?.surveillance || (l.security && l.security !== 'Field Surveillance'))).length;
+  }, [locations]);
+
+  const totalSightings = useMemo(() => {
+    return locations.reduce((acc, l) => acc + l.visitors.length, 0);
+  }, [locations]);
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       
@@ -95,7 +113,7 @@ export default function LocationsView({
           </div>
           <div>
             <div className="text-2xl font-black text-rose-400">
-              {locations.filter(l => l.facilityType.toLowerCase().includes('safehouse')).length || 1}
+              {safehouseCount}
             </div>
             <div className="text-[11px] text-rose-300/80 font-medium uppercase tracking-wider">Active Safehouses</div>
           </div>
@@ -106,8 +124,8 @@ export default function LocationsView({
             <Camera className="w-6 h-6" />
           </div>
           <div>
-            <div className="text-2xl font-black text-cyan-300">CCTV / Drone</div>
-            <div className="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Optical Coverage</div>
+            <div className="text-2xl font-black text-cyan-300">{securedCount}</div>
+            <div className="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Surveillance Monitored</div>
           </div>
         </div>
 
@@ -116,8 +134,8 @@ export default function LocationsView({
             <Fingerprint className="w-6 h-6" />
           </div>
           <div>
-            <div className="text-2xl font-black text-purple-300">Biometric</div>
-            <div className="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Access Intercepted</div>
+            <div className="text-2xl font-black text-purple-300">{totalSightings}</div>
+            <div className="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Suspect Sightings</div>
           </div>
         </div>
       </div>
@@ -240,7 +258,9 @@ export default function LocationsView({
 
               <div className="mt-4 pt-2 border-t border-slate-800/60 flex items-center justify-between text-[10px] text-slate-500 font-mono">
                 <span>Centrality: {Number(loc.betweenness).toFixed(3)}</span>
-                <span className="text-emerald-400">Raid Target Eligible</span>
+                <span className={loc.betweenness > 0.2 ? "text-rose-400 font-bold" : "text-emerald-400 font-semibold"}>
+                  {loc.betweenness > 0.2 ? 'Priority Surveillance' : 'Standard Site'}
+                </span>
               </div>
             </div>
           ))

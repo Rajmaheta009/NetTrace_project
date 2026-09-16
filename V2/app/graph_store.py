@@ -109,7 +109,7 @@ class GraphStore:
             for rel in relationships:
                 existing_rel = self.find_duplicate_relationship(rel)
                 if existing_rel:
-                    # Intelligently merge evidence and weights
+                    # Intelligently merge evidence, weights, and attributes
                     existing_rel.evidence = sorted(set(existing_rel.evidence) | set(rel.evidence))
                     existing_rel.weight = max(existing_rel.weight, rel.weight)
                     if rel.event_id and rel.event_id not in (existing_rel.event_id or ""):
@@ -117,6 +117,9 @@ class GraphStore:
                             existing_rel.event_id = f"{existing_rel.event_id}; {rel.event_id}"
                         else:
                             existing_rel.event_id = rel.event_id
+                    for ak, av in rel.attributes.items():
+                        if ak not in existing_rel.attributes or existing_rel.attributes[ak] in (None, ""):
+                            existing_rel.attributes[ak] = av
                 else:
                     self.relationships[rel.id] = rel
 
@@ -151,6 +154,7 @@ class GraphStore:
                     weight=rel.weight,
                     evidence=rel.evidence,
                     event_id=rel.event_id,
+                    attributes=rel.attributes,
                 )
 
         return graph
@@ -176,6 +180,7 @@ class GraphStore:
                 weight=r.weight,
                 evidence=r.evidence,
                 event_id=r.event_id,
+                attributes=r.attributes,
             )
             for r in self.relationships.values()
             if r.source in self.entities and r.target in self.entities

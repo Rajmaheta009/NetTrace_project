@@ -88,20 +88,15 @@ def classify_and_normalize(raw_content: str) -> ClassificationResult:
     if rows and len(rows) >= 2:
         raw_header = [h.strip().lower() for h in rows[0]]
         header = {COLUMN_ALIASES.get(h, h) for h in raw_header}
-        row_lengths = {len(r) for r in rows}
-        well_formed = len(row_lengths) == 1
-        if well_formed and (
-            STRUCTURED_ENTITY_COLUMNS.issubset(header)
-            or STRUCTURED_RELATIONSHIP_COLUMNS.issubset(header)
-        ):
-            # If aliases were used in header, normalize the header line so downstream parse_csv succeeds
-            if header != set(raw_header):
-                normalized_header = [COLUMN_ALIASES.get(h, h) for h in raw_header]
-                norm_rows = [normalized_header] + rows[1:]
-                out_io = io.StringIO()
-                csv.writer(out_io).writerows(norm_rows)
-                return ClassificationResult("structured", "csv", out_io.getvalue())
-            return ClassificationResult("structured", "csv", content)
+        if STRUCTURED_ENTITY_COLUMNS.issubset(header) or STRUCTURED_RELATIONSHIP_COLUMNS.issubset(header):
+            normalized_header = [COLUMN_ALIASES.get(h, h) for h in raw_header]
+            padded_rows = [normalized_header]
+            for r in rows[1:]:
+                padded_r = r + [""] * (len(normalized_header) - len(r))
+                padded_rows.append(padded_r[:len(normalized_header)])
+            out_io = io.StringIO()
+            csv.writer(out_io).writerows(padded_rows)
+            return ClassificationResult("structured", "csv", out_io.getvalue())
         return ClassificationResult("semi_structured", "text", _flatten_rows_to_text(rows))
 
     # 3. Key:value / log-like lines still count as semi-structured; everything

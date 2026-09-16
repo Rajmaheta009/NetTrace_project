@@ -28,18 +28,22 @@ export default function FinancialView({
   const nodes = graphData?.nodes || [];
   const links = graphData?.links || [];
 
+  const getEndpointId = (ep) => (typeof ep === 'object' && ep !== null ? ep.id : ep);
+
   // Extract organizations (shell companies, conduits, trading fronts)
   const organizations = useMemo(() => {
     return nodes.filter(n => n.type === 'Organization').map(org => {
       // Related links
-      const orgLinks = links.filter(l => l.source === org.id || l.target === org.id);
+      const orgLinks = links.filter(l => getEndpointId(l.source) === org.id || getEndpointId(l.target) === org.id);
       
       const members = [];
       const locations = [];
       const evidence = [];
 
       orgLinks.forEach(link => {
-        const otherId = link.source === org.id ? link.target : link.source;
+        const sId = getEndpointId(link.source);
+        const tId = getEndpointId(link.target);
+        const otherId = sId === org.id ? tId : sId;
         const otherNode = nodes.find(n => n.id === otherId);
         if (otherNode) {
           if (otherNode.type === 'Person') members.push(otherNode);
@@ -61,66 +65,51 @@ export default function FinancialView({
     });
   }, [nodes, links]);
 
-  // Derived Hawala and Money Laundering Transactions Ledger
+  // Derived Hawala and Money Laundering Transactions from actual Graph Links & Nodes
   const transactions = useMemo(() => {
-    const list = [
-      {
-        txId: 'HWL-2026-0891',
-        originator: 'Rajesh Shrestha',
-        originatorId: 'p2',
-        beneficiary: 'Vikram Singhania',
-        beneficiaryId: 'p1',
-        conduit: 'Al-Zahra Global Trading LLC',
-        conduitId: 'org1',
-        amount: '₹ 15,00,00,000 (15 Cr)',
-        channel: 'Trade-Based Hawala Over-Invoicing',
-        risk: 'CRITICAL',
-        evidence: 'Wiretap intercept confirms cross-border settlement for maritime narcotics offload.',
-        timestamp: '2026-03-11 11:20:00 UTC',
-      },
-      {
-        txId: 'HWL-2026-0894',
-        originator: 'Anita Rao',
-        originatorId: 'p3',
-        beneficiary: 'Coastal Shipping & Logistics',
-        beneficiaryId: 'org2',
-        conduit: 'Al-Zahra Global Trading LLC',
-        conduitId: 'org1',
-        amount: '₹ 4,20,00,000 (4.2 Cr)',
-        channel: 'Corporate Shell Loan / Layering',
-        risk: 'HIGH',
-        evidence: 'Bank audit trail reveals unauthorized commercial transfer disguised as container demurrage.',
-        timestamp: '2026-03-12 16:05:00 UTC',
-      },
-      {
-        txId: 'HWL-2026-0902',
-        originator: 'Rajesh Shrestha',
-        originatorId: 'p2',
-        beneficiary: 'Sanjay Patel',
-        beneficiaryId: 'p4',
-        conduit: 'Cash Courier / Hawala Chit',
-        conduitId: 'p2',
-        amount: '₹ 75,00,000 (75 Lakh)',
-        channel: 'Physical Cash Chit Courier',
-        risk: 'HIGH',
-        evidence: 'Passed briefcase at Cafe Coastal matching token serial #KZ-8812.',
-        timestamp: '2026-03-13 14:15:00 UTC',
-      }
-    ];
+    const list = [];
+    let txCounter = 1;
 
-    // Connect with nodes if present
-    return list.map(tx => {
-      const origNode = nodes.find(n => n.id === tx.originatorId || n.name === tx.originator);
-      const benNode = nodes.find(n => n.id === tx.beneficiaryId || n.name === tx.beneficiary);
-      const conNode = nodes.find(n => n.id === tx.conduitId || n.name === tx.conduit);
-      return {
-        ...tx,
-        origNode,
-        benNode,
-        conNode,
-      };
+    links.forEach((link) => {
+      const sId = getEndpointId(link.source);
+      const tId = getEndpointId(link.target);
+      const srcNode = nodes.find(n => n.id === sId);
+      const tgtNode = nodes.find(n => n.id === tId);
+      if (!srcNode || !tgtNode) return;
+
+      const relUpper = (link.relation_type || '').toUpperCase();
+      const evidenceText = (link.evidence || []).join(' ');
+      const isFinRel = ['TRANSFERRED', 'PAID', 'FUNDED', 'FINANCIAL', 'MEMBER_OF', 'HAWALA', 'INVESTED_IN', 'SETTLED'].includes(relUpper);
+      const isOrgTransfer = srcNode.type === 'Organization' || tgtNode.type === 'Organization';
+      const hasMoneySign = /(?:₹|Rs\.?|INR|\$|Cr|Crore|Lakh|hawala|settlement|payment|transfer|account)/i.test(evidenceText);
+
+      if (isFinRel || isOrgTransfer || hasMoneySign) {
+        // Extract amount if present in evidence or attributes
+        const amountMatch = evidenceText.match(/(?:₹|Rs\.?|INR|\$)\s*[\d,.]+\s*(?:Cr|Crore|Lakh|k|M)?/i)
+          || link.attributes?.amount;
+        const amountStr = amountMatch ? (typeof amountMatch === 'string' ? amountMatch : amountMatch[0]) : (link.attributes?.amount || 'Documented Transfer');
+
+        list.push({
+          txId: link.event_id ? `TX-${link.event_id}` : `TX-FIN-${String(txCounter++).padStart(3, '0')}`,
+          originator: srcNode.name || srcNode.id,
+          originatorId: srcNode.id,
+          beneficiary: tgtNode.name || tgtNode.id,
+          beneficiaryId: tgtNode.id,
+          conduit: (srcNode.type === 'Organization' ? srcNode.name : (tgtNode.type === 'Organization' ? tgtNode.name : 'Direct Channel')),
+          conduitId: (srcNode.type === 'Organization' ? srcNode.id : tgtNode.id),
+          amount: amountStr,
+          channel: relUpper ? relUpper.replace(/_/g, ' ') : 'COMMERCIAL FLOW',
+          risk: (srcNode.centrality?.betweenness > 0.3 || tgtNode.centrality?.betweenness > 0.3) ? 'CRITICAL' : 'EVALUATED',
+          evidence: link.evidence?.[0] || 'Direct inter-entity transaction documented in case intelligence',
+          timestamp: link.attributes?.timestamp || (link.event_id ? `Event: ${link.event_id}` : 'Case Intercept'),
+          origNode: srcNode,
+          benNode: tgtNode,
+        });
+      }
     });
-  }, [nodes]);
+
+    return list;
+  }, [nodes, links]);
 
   const filteredOrgs = useMemo(() => {
     return organizations.filter(o => {
@@ -142,11 +131,26 @@ export default function FinancialView({
                     t.conduit.toLowerCase().includes(q) ||
                     t.channel.toLowerCase().includes(q);
       
-      if (filterMode === 'HIGH_VALUE') return match && t.amount.includes('Cr');
-      if (filterMode === 'SHELL_ONLY') return match && t.channel.toLowerCase().includes('shell');
+      if (filterMode === 'HIGH_VALUE') return match && (t.amount.includes('Cr') || t.amount.includes('Lakh'));
+      if (filterMode === 'SHELL_ONLY') return match && t.channel.toLowerCase().includes('member');
       return match;
     });
   }, [transactions, searchQuery, filterMode]);
+
+  const primaryAxis = useMemo(() => {
+    const jurisdictions = organizations.map(o => o.jurisdiction).filter(j => j && j !== 'Offshore Jurisdiction');
+    if (!jurisdictions.length) return organizations.length ? 'Domestic Fleet' : 'None Registered';
+    return [...new Set(jurisdictions)].slice(0, 2).join(' • ');
+  }, [organizations]);
+
+  const volumeDisplay = useMemo(() => {
+    if (!transactions.length) return '₹ 0';
+    const explicitAmounts = transactions.filter(t => t.amount.includes('₹') || t.amount.includes('Cr') || t.amount.includes('Lakh'));
+    if (explicitAmounts.length > 0) {
+      return explicitAmounts[0].amount;
+    }
+    return `${transactions.length} Active Trails`;
+  }, [transactions]);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -168,7 +172,7 @@ export default function FinancialView({
             <TrendingUp className="w-6 h-6" />
           </div>
           <div>
-            <div className="text-2xl font-black text-emerald-400">₹ 19.95 Cr</div>
+            <div className="text-2xl font-black text-emerald-400">{volumeDisplay}</div>
             <div className="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Identified Volume</div>
           </div>
         </div>
@@ -188,8 +192,8 @@ export default function FinancialView({
             <Globe className="w-6 h-6" />
           </div>
           <div>
-            <div className="text-2xl font-black text-cyan-300">Offshore</div>
-            <div className="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Dubai / Mumbai Axis</div>
+            <div className="text-xl font-black text-cyan-300 truncate max-w-[140px]">{primaryAxis}</div>
+            <div className="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Jurisdiction Axis</div>
           </div>
         </div>
       </div>
@@ -351,7 +355,13 @@ export default function FinancialView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 font-medium">
-                  {filteredTx.map((tx) => (
+                  {filteredTx.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-12 text-center text-slate-500 text-xs">
+                        No financial transactions or laundering trails recorded in active case data.
+                      </td>
+                    </tr>
+                  ) : filteredTx.map((tx) => (
                     <tr key={tx.txId} className="hover:bg-slate-800/40 transition">
                       <td className="py-3.5 px-4">
                         <span className="font-mono font-bold text-slate-200 block">{tx.txId}</span>
