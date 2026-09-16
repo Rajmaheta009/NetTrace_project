@@ -61,6 +61,12 @@ def run_import(request: ImportRequest) -> ImportResponse:
             # Build a raw-id -> global-id map from whatever entities already exist in the store
             # (covers the common two-call pattern: import entities.csv, then relationships.csv).
             raw_to_global = {e.id: e.id for e in store.entities.values()}
+            for e in store.entities.values():
+                raw_to_global[e.name] = e.id
+                raw_to_global[e.name.lower()] = e.id
+                for a in e.aliases:
+                    raw_to_global[a] = e.id
+                    raw_to_global[a.lower()] = e.id
             relationships, w = extract_from_structured_relationships(
                 relationship_rows, raw_to_global, request.source_label
             )
@@ -78,6 +84,12 @@ def run_import(request: ImportRequest) -> ImportResponse:
         imported_entities += len(entities)
 
         raw_to_global = {**id_map, **{e.id: e.id for e in store.entities.values()}}
+        for e in store.entities.values():
+            raw_to_global[e.name] = e.id
+            raw_to_global[e.name.lower()] = e.id
+            for a in e.aliases:
+                raw_to_global[a] = e.id
+                raw_to_global[a.lower()] = e.id
         relationships, w = extract_from_structured_relationships(
             relationship_rows, raw_to_global, request.source_label
         )

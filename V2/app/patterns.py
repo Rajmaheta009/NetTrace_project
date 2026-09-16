@@ -137,10 +137,12 @@ def detect_repeated_cooccurrence_pattern(graph: nx.MultiGraph) -> List[PatternFl
         event_id = data.get("event_id")
         if not event_id:
             continue
-        if graph.nodes.get(u, {}).get("type") == "Person":
-            event_to_people[event_id].add(u)
-        if graph.nodes.get(v, {}).get("type") == "Person":
-            event_to_people[event_id].add(v)
+        event_ids = [e.strip() for e in str(event_id).split(";") if e.strip()]
+        for eid in event_ids:
+            if graph.nodes.get(u, {}).get("type") == "Person":
+                event_to_people[eid].add(u)
+            if graph.nodes.get(v, {}).get("type") == "Person":
+                event_to_people[eid].add(v)
 
     pair_event_count: Dict[frozenset, set] = defaultdict(set)
     for event_id, people in event_to_people.items():
