@@ -20,8 +20,14 @@ import {
   Move,
   RotateCcw,
   Pin,
-  ZoomIn,
-  ZoomOut
+  ArrowLeft,
+  History,
+  Target,
+  Users,
+  Award,
+  Flame,
+  ChevronUp,
+  ChevronDown
 } from 'lucide-react';
 import { getEntityColor, RELATION_LABELS } from '../utils/colors';
 import { logAuditAction } from '../services/api';
@@ -50,18 +56,33 @@ export default function GraphView({
   onSelectEntity, 
   isDrawerOpen = false,
   onOpenDrawer,
+  onDeepInspect = null,
+  crimeProfile = null,
   onRefresh,
   onOpenIngest,
   onLoadDemo,
-  theme = 'midnight'
+  theme = 'midnight',
+  highlightedCommunity = null,
+  onClearCommunityHighlight = null,
+  highlightedPath = null,
+  onClearPathHighlight = null
 }) {
   const [autoRotate, setAutoRotate] = useState(true);
   const [showPulses, setShowPulses] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('ALL');
+  const [minConfidence, setMinConfidence] = useState(0.0);
+  const [inspectedRelationship, setInspectedRelationship] = useState(null);
+  const [showCommunityHalos, setShowCommunityHalos] = useState(true);
+  const [filterByCrimeProfile, setFilterByCrimeProfile] = useState(false);
 
   // Custom dragged/pinned 3D node coordinates: { [nodeId]: { x, y, z } }
   const [customPositions, setCustomPositions] = useState({});
+
+  // History tracking for visited suspects / criminals
+  const [historyCriminals, setHistoryCriminals] = useState([]);
+  const [isRightHudOpen, setIsRightHudOpen] = useState(true);
+  const [rightHudTab, setRightHudTab] = useState('targets'); // 'targets' | 'selected' | 'history'
 
   // 3D Camera Controls
   const [rotX, setRotX] = useState(0.35); // pitch
@@ -102,16 +123,18 @@ export default function GraphView({
     const connectedLinks = [];
 
     links.forEach(l => {
-      if (l.source === selectedEntityId) {
-        neighborIds.add(l.target);
-        if (!neighborRelMap.has(l.target)) {
-          neighborRelMap.set(l.target, l.relation_type);
+      const sId = typeof l.source === 'object' && l.source !== null ? l.source.id : l.source;
+      const tId = typeof l.target === 'object' && l.target !== null ? l.target.id : l.target;
+      if (sId === selectedEntityId) {
+        neighborIds.add(tId);
+        if (!neighborRelMap.has(tId)) {
+          neighborRelMap.set(tId, l.relation_type);
         }
         connectedLinks.push(l);
-      } else if (l.target === selectedEntityId) {
-        neighborIds.add(l.source);
-        if (!neighborRelMap.has(l.source)) {
-          neighborRelMap.set(l.source, l.relation_type);
+      } else if (tId === selectedEntityId) {
+        neighborIds.add(sId);
+        if (!neighborRelMap.has(sId)) {
+          neighborRelMap.set(sId, l.relation_type);
         }
         connectedLinks.push(l);
       }
@@ -138,6 +161,58 @@ export default function GraphView({
       };
     });
   }, [selectedNeighborhood, nodes, selectedEntityId]);
+
+  // ---------------------------------------------------------
+  // Visited Criminals History & Main Syndicate Targets
+  // ---------------------------------------------------------
+  useEffect(() => {
+    if (!selectedEntityId) return;
+    const node = nodes.find(n => n.id === selectedEntityId);
+    if (!node) return;
+
+    // Auto switch right HUD to 'selected' tab when user inspects an entity
+    setRightHudTab('selected');
+
+    // If inspected entity is a Person (criminal suspect), append to history
+    if (node.type === 'Person') {
+      setHistoryCriminals(prev => {
+        const filtered = prev.filter(p => p.id !== node.id);
+        return [{
+          id: node.id,
+          name: node.name,
+          role: node.attributes?.role || 'Suspect',
+          betweenness: node.centrality?.betweenness || 0,
+          degree: node.centrality?.degree || 0,
+          timestamp: Date.now()
+        }, ...filtered].slice(0, 30);
+      });
+    }
+  }, [selectedEntityId, nodes]);
+
+  // Previous Criminal from history (most recently visited person prior to current)
+  const previousCriminal = useMemo(() => {
+    return historyCriminals.find(h => h.id !== selectedEntityId) || null;
+  }, [historyCriminals, selectedEntityId]);
+
+  // Ranked Main Criminals (Key Syndicate Targets) by Betweenness & Degree Centrality
+  const mainCriminals = useMemo(() => {
+    return nodes
+      .filter(n => n.type === 'Person')
+      .map(p => {
+        const bw = Number(p.centrality?.betweenness || 0);
+        const deg = Number(p.centrality?.degree || 0);
+        // Composite criminal prominence score
+        const score = bw * 0.7 + (deg / Math.max(nodes.length, 1)) * 0.3;
+        return {
+          ...p,
+          score,
+          betweenness: bw,
+          degree: deg,
+          role: p.attributes?.role || 'Suspect'
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+  }, [nodes]);
 
   // ---------------------------------------------------------
   // Base 3D Spherical Coordinates (Fibonacci Sphere)
@@ -215,9 +290,18 @@ export default function GraphView({
   // ---------------------------------------------------------
   const handleLocateKingpin = () => {
     if (!nodes.length) return;
+    const topPerson = mainCriminals[0];
+    if (topPerson) {
+      onSelectEntity(topPerson.id, false);
+      setRightHudTab('selected');
+      setIsRightHudOpen(true);
+      return;
+    }
     const topNode = [...nodes].sort((a, b) => (b.centrality?.betweenness || 0) - (a.centrality?.betweenness || 0))[0];
     if (topNode) {
-      onSelectEntity(topNode.id);
+      onSelectEntity(topNode.id, false);
+      setRightHudTab('selected');
+      setIsRightHudOpen(true);
     }
   };
 
@@ -347,12 +431,20 @@ export default function GraphView({
         const raw = nodePositions3D[node.id];
         if (!raw) return;
 
+        const q = searchQuery.toLowerCase();
+        const aliasMatch = Array.isArray(node.aliases)
+          ? node.aliases.some(a => String(a).toLowerCase().includes(q))
+          : (node.aliases && String(node.aliases).toLowerCase().includes(q));
         const isMatchSearch = hasSearch && (
-          node.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-          node.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          (node.attributes?.role && node.attributes.role.toLowerCase().includes(searchQuery.toLowerCase())) ||
-          (node.attributes?.model && node.attributes.model.toLowerCase().includes(searchQuery.toLowerCase())) ||
-          (node.attributes?.phone && node.attributes.phone.toLowerCase().includes(searchQuery.toLowerCase()))
+          node.name.toLowerCase().includes(q) || 
+          node.id.toLowerCase().includes(q) ||
+          (node.attributes?.role && String(node.attributes.role).toLowerCase().includes(q)) ||
+          (node.attributes?.model && String(node.attributes.model).toLowerCase().includes(q)) ||
+          (node.attributes?.phone && String(node.attributes.phone).toLowerCase().includes(q)) ||
+          (node.attributes?.plate && String(node.attributes.plate).toLowerCase().includes(q)) ||
+          (node.attributes?.category && String(node.attributes.category).toLowerCase().includes(q)) ||
+          (node.attributes?.jurisdiction && String(node.attributes.jurisdiction).toLowerCase().includes(q)) ||
+          Boolean(aliasMatch)
         );
 
         const matchesType = activeFilter === 'ALL' || node.type === activeFilter;
@@ -407,11 +499,24 @@ export default function GraphView({
       //    (Maintains dynamic connection even when node is moved!)
       // -------------------------------------------------------
       links.forEach((link) => {
-        const p1 = projectedMap[link.source];
-        const p2 = projectedMap[link.target];
+        if (minConfidence > 0 && link.confidence !== undefined && link.confidence < minConfidence) {
+          return;
+        }
+        const sId = typeof link.source === 'object' && link.source !== null ? link.source.id : link.source;
+        const tId = typeof link.target === 'object' && link.target !== null ? link.target.id : link.target;
+        const p1 = projectedMap[sId];
+        const p2 = projectedMap[tId];
         if (!p1 || !p2) return;
 
-        const isDirectToSelected = selectedEntityId && (link.source === selectedEntityId || link.target === selectedEntityId);
+        const isPathLink = highlightedPath && highlightedPath.length >= 2 && (
+          highlightedPath.some((nodeId, idx) => {
+            if (idx === highlightedPath.length - 1) return false;
+            const nextNodeId = highlightedPath[idx + 1];
+            return (sId === nodeId && tId === nextNodeId) || (sId === nextNodeId && tId === nodeId);
+          })
+        );
+
+        const isDirectToSelected = selectedEntityId && (sId === selectedEntityId || tId === selectedEntityId);
         const avgZ = (p1.z + p2.z) / 2;
         let depthAlpha = Math.max(0.18, Math.min(0.95, (avgZ + 280) / 500));
 
@@ -427,7 +532,12 @@ export default function GraphView({
         ctx.moveTo(p1.x, p1.y);
         ctx.lineTo(p2.x, p2.y);
 
-        if (isDirectToSelected) {
+        if (isPathLink) {
+          ctx.strokeStyle = '#f59e0b';
+          ctx.lineWidth = 4.5 * ((p1.scale + p2.scale) / 2);
+          ctx.shadowColor = '#f59e0b';
+          ctx.shadowBlur = 20;
+        } else if (isDirectToSelected) {
           ctx.strokeStyle = isLight ? '#0284c7' : '#38bdf8';
           ctx.lineWidth = 3.8 * ((p1.scale + p2.scale) / 2);
           ctx.shadowColor = '#38bdf8';
@@ -442,7 +552,9 @@ export default function GraphView({
 
         // Moving Wiretap Pulse along the line
         if (showPulses && (isDirectToSelected || (!selectedEntityId && (!hasSearch || p1.isMatchSearch || p2.isMatchSearch)))) {
-          const pulseT = (pulsePhaseRef.current + (parseInt(link.source.replace(/\D/g, '') || 1) * 0.2)) % 1;
+          const rawSourceStr = typeof sId === 'string' ? sId : String(sId || '1');
+          const pulseSeed = parseInt(rawSourceStr.replace(/\D/g, '') || '1', 10);
+          const pulseT = (pulsePhaseRef.current + (pulseSeed * 0.2)) % 1;
           const pulseX = p1.x + (p2.x - p1.x) * pulseT;
           const pulseY = p1.y + (p2.y - p1.y) * pulseT;
           const pulseScale = (p1.scale + p2.scale) / 2;
@@ -505,6 +617,31 @@ export default function GraphView({
           ctx.lineWidth = 2.5;
           ctx.shadowColor = '#f59e0b';
           ctx.shadowBlur = 15;
+          ctx.stroke();
+        }
+
+        // Community Halo
+        if (showCommunityHalos && p.node.community_id) {
+          const isTargetCommunity = highlightedCommunity && p.node.community_id === highlightedCommunity;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.radius + (isTargetCommunity ? 16 : 7) * p.scale, 0, 2 * Math.PI);
+          ctx.strokeStyle = isTargetCommunity ? '#818cf8' : 'rgba(129, 140, 248, 0.35)';
+          ctx.lineWidth = isTargetCommunity ? 3 : 1.2;
+          if (isTargetCommunity) {
+            ctx.shadowColor = '#818cf8';
+            ctx.shadowBlur = 18;
+          }
+          ctx.stroke();
+        }
+
+        // Connection Finder Path Highlight Beacon
+        if (highlightedPath && highlightedPath.includes(p.node.id)) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.radius + 12 * p.scale, 0, 2 * Math.PI);
+          ctx.strokeStyle = '#f59e0b';
+          ctx.lineWidth = 3;
+          ctx.shadowColor = '#f59e0b';
+          ctx.shadowBlur = 20;
           ctx.stroke();
         }
 
@@ -872,6 +1009,17 @@ export default function GraphView({
     }
   };
 
+  // Global window mouseup listener to catch releases outside canvas or viewport
+  useEffect(() => {
+    const handleGlobalMouseUp = (e) => {
+      if (isDraggingRef.current) {
+        handleMouseUp(e);
+      }
+    };
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => window.removeEventListener('mouseup', handleGlobalMouseUp);
+  }, [nodes]);
+
   // Native non-passive wheel listener on canvas & container to prevent page zoom/scroll
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1005,30 +1153,7 @@ export default function GraphView({
             </button>
           </div>
 
-                    {/* Zoom Controls & Level Indicator */}
-          <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px] font-mono shadow-inner">
-            <button
-              onClick={() => setCameraZ((prev) => Math.max(160, prev - 50))}
-              className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-cyan-300 transition"
-              title="Zoom In (or mouse scroll up)"
-            >
-              <ZoomIn className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => setCameraZ(460)}
-              className="px-1.5 py-0.5 rounded hover:bg-slate-800 text-[10px] text-cyan-400 font-bold hover:text-white transition"
-              title="Reset Zoom to 100%"
-            >
-              {Math.round((460 / cameraZ) * 100)}%
-            </button>
-            <button
-              onClick={() => setCameraZ((prev) => Math.min(850, prev + 50))}
-              className="p-1 rounded hover:bg-slate-800 text-slate-300 hover:text-cyan-300 transition"
-              title="Zoom Out (or mouse scroll down)"
-            >
-              <ZoomOut className="w-3.5 h-3.5" />
-            </button>
-          </div>
+          
 
           {/* Quick Kingpin Focus Button */}
           <button
@@ -1039,6 +1164,39 @@ export default function GraphView({
             <Crown className="w-3.5 h-3.5" />
             <span className="hidden md:inline">Focus Kingpin</span>
           </button>
+
+          {/* Previous Criminal Quick Navigation */}
+          {previousCriminal && (
+            <button
+              onClick={() => {
+                onSelectEntity(previousCriminal.id, false);
+                setRightHudTab('selected');
+              }}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 hover:text-white border border-indigo-500/40 text-xs font-bold transition shadow-md hover:scale-105 animate-fadeIn"
+              title={`Return to previous suspect: ${previousCriminal.name}`}
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden lg:inline">Prev Suspect:</span>
+              <span className="text-white font-mono truncate max-w-[100px]">{previousCriminal.name}</span>
+            </button>
+          )}
+
+          {/* Main Criminals Target Registry Navigation Button */}
+          {mainCriminals.length > 0 && (
+            <button
+              onClick={() => {
+                document.getElementById('syndicate-targets-section')?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-rose-300 text-xs font-bold transition shadow-sm cursor-pointer"
+              title="Jump to Syndicate Target Registry below the 3D graph"
+            >
+              <Target className="w-3.5 h-3.5 text-rose-400" />
+              <span className="hidden sm:inline">Criminal Targets</span>
+              <span className="px-1.5 py-0.2 rounded-full bg-rose-500/20 text-[10px] font-mono font-bold text-rose-300">
+                {mainCriminals.length}
+              </span>
+            </button>
+          )}
 
           {/* Reset Dragged Nodes Button (Visible when nodes have been moved) */}
           {movedNodeCount > 0 && (
@@ -1080,7 +1238,56 @@ export default function GraphView({
             <option value="Location">Location</option>
             <option value="PhoneNumber">Phone</option>
             <option value="Organization">Organization</option>
+            <option value="Event">Event</option>
           </select>
+
+          {/* Crime Profile Priority Filter */}
+          {crimeProfile && (
+            <button
+              onClick={() => setFilterByCrimeProfile(!filterByCrimeProfile)}
+              className={`px-2.5 py-1 rounded-xl border text-[11px] font-mono font-bold transition flex items-center space-x-1.5 ${
+                filterByCrimeProfile
+                  ? 'bg-rose-500/25 border-rose-500/50 text-rose-300 shadow-sm shadow-rose-950/40'
+                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+              title={`Prioritize vectors for ${crimeProfile.name}`}
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+              <span className="hidden xl:inline">Profile Focus:</span>
+              <span className="truncate max-w-[120px]">{crimeProfile.name}</span>
+            </button>
+          )}
+
+          {/* Confidence Threshold Slider */}
+          <div className="hidden lg:flex items-center space-x-1.5 bg-slate-950 border border-slate-800 px-2.5 py-1 rounded-xl text-[10px] font-mono">
+            <span className="text-slate-400">Min Conf:</span>
+            <input
+              type="range"
+              min="0"
+              max="0.9"
+              step="0.05"
+              value={minConfidence}
+              onChange={(e) => setMinConfidence(parseFloat(e.target.value))}
+              className="w-16 accent-cyan-400 cursor-pointer"
+              title="Filter links below confidence threshold"
+            />
+            <span className="text-cyan-400 font-bold w-6 text-right">
+              {minConfidence > 0 ? `${(minConfidence * 100).toFixed(0)}%` : 'All'}
+            </span>
+          </div>
+
+          {/* Halos Toggle */}
+          <button
+            onClick={() => setShowCommunityHalos(!showCommunityHalos)}
+            className={`px-2.5 py-1 rounded-xl border text-[11px] font-mono font-bold transition ${
+              showCommunityHalos
+                ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-300'
+                : 'bg-slate-950 border-slate-800 text-slate-500'
+            }`}
+            title="Toggle Modularity Community Halos"
+          >
+            Halos
+          </button>
 
           {/* Pulse Toggle */}
           <button
@@ -1097,6 +1304,29 @@ export default function GraphView({
         </div>
 
       </div>
+
+      {/* Active Highlighting Banners */}
+      {(highlightedCommunity || highlightedPath) && (
+        <div className="flex items-center justify-between px-4 py-2 bg-indigo-950/70 border border-indigo-500/40 rounded-2xl text-xs font-mono">
+          <div className="flex items-center space-x-2 text-indigo-200">
+            <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
+            <span>
+              {highlightedCommunity
+                ? `Highlighting Cluster: ${highlightedCommunity}`
+                : `Highlighting Shortest Path (${highlightedPath.length} nodes)`}
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              if (onClearCommunityHighlight) onClearCommunityHighlight();
+              if (onClearPathHighlight) onClearPathHighlight();
+            }}
+            className="px-2 py-0.5 rounded bg-indigo-900/60 hover:bg-indigo-800 text-indigo-300 text-[10px] cursor-pointer"
+          >
+            Clear Highlight ✕
+          </button>
+        </div>
+      )}
 
       {/* 3D Viewport Canvas Container */}
       <div ref={containerRef} style={{ overscrollBehavior: "contain", touchAction: "none" }} className="relative w-full h-[620px] rounded-3xl overflow-hidden bg-gradient-to-b from-[#020617] via-[#050b1d] to-[#02040d] border border-slate-800/80 shadow-2xl">
@@ -1115,109 +1345,6 @@ export default function GraphView({
             <span>Click & hold any node to drag • Relations stay attached</span>
           </div>
         </div>
-
-        {/* INTERACTIVE 1-HOP NEIGHBORHOOD HUD CARD */}
-        {selectedNode && (
-          <div className={`absolute top-4 ${isDrawerOpen ? 'right-4 lg:right-[405px]' : 'right-4'} z-20 max-w-sm bg-slate-950/95 backdrop-blur-xl border border-cyan-500/50 rounded-2xl p-4 shadow-2xl shadow-cyan-950/50 animate-fadeIn font-sans transition-all duration-300`}>
-            <div className="flex items-start justify-between border-b border-slate-800 pb-2.5">
-              <div>
-                <div className="flex items-center space-x-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
-                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
-                    {selectedNode.type}
-                  </span>
-                  <span className="text-[10px] text-slate-400 font-mono">
-                    Betweenness: {Number(selectedNode.centrality?.betweenness || 0).toFixed(3)}
-                  </span>
-                </div>
-                <h4 className="text-base font-black text-white mt-1 flex items-center space-x-1.5">
-                  <span>{selectedNode.name}</span>
-                  {customPositions[selectedNode.id] && (
-                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40">
-                      Pinned
-                    </span>
-                  )}
-                </h4>
-                {selectedNode.attributes?.role && (
-                  <p className="text-xs text-cyan-400 font-medium">{selectedNode.attributes.role}</p>
-                )}
-              </div>
-
-              {/* Close / Deselect */}
-              <button
-                onClick={() => onSelectEntity(null)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-                title="Deselect and un-dim other nodes"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Attached Connected Nodes */}
-            <div className="mt-3">
-              <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 mb-1.5">
-                <span>Directly Attached Nodes ({neighborObjects.length})</span>
-                <span className="text-[10px] text-cyan-400 font-mono font-normal">Highlighted Bold</span>
-              </div>
-
-              {neighborObjects.length === 0 ? (
-                <p className="text-xs text-slate-500 italic">No direct connections recorded.</p>
-              ) : (
-                <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto pr-1 scrollbar-thin">
-                  {neighborObjects.map(nb => (
-                    <button
-                      key={nb.id}
-                      onClick={() => onSelectEntity(nb.id)}
-                      className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-xl bg-slate-900/90 hover:bg-cyan-500/20 text-slate-200 hover:text-cyan-200 border border-slate-700/80 hover:border-cyan-500/40 text-xs font-bold transition shadow-sm"
-                      title={`Click to focus on ${nb.name}`}
-                    >
-                      {getTypeIcon(nb.type)}
-                      <span className="truncate max-w-[130px]">{nb.name}</span>
-                      <span className="text-[9px] font-mono text-cyan-400 opacity-80">({nb.relType})</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Position Reset if moved */}
-            {customPositions[selectedNode.id] && (
-              <div className="mt-2.5 pt-2 border-t border-slate-800/80 flex items-center justify-between">
-                <span className="text-[11px] text-purple-300">Repositioned in 3D</span>
-                <button
-                  onClick={() => handleResetNodePosition(selectedNode.id)}
-                  className="text-[11px] text-purple-400 hover:text-purple-200 font-bold inline-flex items-center space-x-1"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  <span>Unpin Position</span>
-                </button>
-              </div>
-            )}
-
-            {/* Quick Drawer Hint */}
-            <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
-              <span className="text-slate-500">Inspect 1-hop neighborhood & evidence</span>
-              <button
-                onClick={() => {
-                  if (onOpenDrawer) {
-                    onOpenDrawer(selectedNode.id);
-                  } else {
-                    onSelectEntity(selectedNode.id);
-                  }
-                }}
-                className={`font-bold inline-flex items-center space-x-1 px-2.5 py-1 rounded-xl transition shadow-sm cursor-pointer ${
-                  isDrawerOpen
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
-                    : 'bg-cyan-500/10 hover:bg-cyan-500/25 text-cyan-300 hover:text-white border border-cyan-500/30'
-                }`}
-                title="Open forensic dossier side drawer"
-              >
-                <span>{isDrawerOpen ? 'Drawer Open' : 'Open Drawer'}</span>
-                <ChevronRight className={`w-3.5 h-3.5 transition-transform ${isDrawerOpen ? 'rotate-90 text-cyan-400' : ''}`} />
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* 3D Orbit Canvas with Node Dragging Support */}
         <canvas
@@ -1310,6 +1437,600 @@ export default function GraphView({
 
       </div>
 
+      {/* ========================================================================= */}
+      {/* SYNDICATE TARGET REGISTRY & OPERATIONAL FOCUS (BELOW 3D VIEWPORT)          */}
+      {/* ========================================================================= */}
+      {nodes.length > 0 && (
+        <div id="syndicate-targets-section" className="space-y-4 pt-2 animate-fadeIn">
+          
+          {/* Section Header Banner */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/90 backdrop-blur-md p-4 rounded-3xl border border-slate-800 shadow-xl">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-rose-500/20 to-amber-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400 shadow-inner">
+                <Target className="w-5 h-5 text-rose-400" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h3 className="text-base font-black text-white tracking-wide font-sans">
+                    Syndicate Target Registry & Operational Focus
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/30 text-[10px] font-mono font-bold text-rose-300">
+                    {mainCriminals.length} Identified
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Algorithmic hierarchy based on NetworkX Betweenness Centrality & Bridge Brokerage. Click any suspect card to focus camera and center in 3D above.
+                </p>
+              </div>
+            </div>
+
+            {/* Quick Actions & View Filters */}
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={handleLocateKingpin}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition shadow-sm cursor-pointer"
+                title="Automatically center 3D camera on #1 Kingpin"
+              >
+                <Crown className="w-3.5 h-3.5 text-amber-400" />
+                <span>Focus #1 Kingpin</span>
+              </button>
+
+              <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-bold">
+                <button
+                  onClick={() => setRightHudTab('targets')}
+                  className={`flex items-center space-x-1 px-3 py-1 rounded-lg transition cursor-pointer ${
+                    rightHudTab === 'targets'
+                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Target className="w-3.5 h-3.5" />
+                  <span>All Targets ({mainCriminals.length})</span>
+                </button>
+
+                <button
+                  onClick={() => setRightHudTab('selected')}
+                  className={`flex items-center space-x-1 px-3 py-1 rounded-lg transition cursor-pointer ${
+                    rightHudTab === 'selected'
+                      ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Crosshair className="w-3.5 h-3.5" />
+                  <span>
+                    {selectedNode ? `Active: ${selectedNode.name}` : 'Active Focus'}
+                  </span>
+                  {selectedNode && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping ml-0.5" />}
+                </button>
+
+                {historyCriminals.length > 0 && (
+                  <button
+                    onClick={() => setRightHudTab('history')}
+                    className={`flex items-center space-x-1 px-3 py-1 rounded-lg transition cursor-pointer ${
+                      rightHudTab === 'history'
+                        ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <History className="w-3.5 h-3.5" />
+                    <span>Trail ({historyCriminals.length})</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Target Registry Grid & Active Focus Section */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            
+            {/* PRIMARY COLUMN: KEY SYNDICATE TARGETS (MAIN CRIMINALS) */}
+            <div className={`space-y-3 ${rightHudTab === 'targets' ? 'lg:col-span-7' : rightHudTab === 'selected' ? 'lg:col-span-5' : 'lg:col-span-6'}`}>
+              <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-4 shadow-xl space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
+                  <div className="flex items-center space-x-2">
+                    <Flame className="w-4 h-4 text-rose-400" />
+                    <h4 className="text-sm font-black text-white uppercase tracking-wider font-mono">
+                      Syndicate Target Registry
+                    </h4>
+                  </div>
+                  <span className="text-[11px] font-mono text-slate-400">
+                    Ranked by Betweenness & Influence
+                  </span>
+                </div>
+
+                {mainCriminals.length === 0 ? (
+                  <div className="p-8 text-center text-slate-500 text-xs italic">
+                    No suspect entities classified as Person found in graph.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-[540px] overflow-y-auto pr-1 scrollbar-thin">
+                    {mainCriminals.map((criminal, index) => {
+                      const isCurrent = selectedEntityId === criminal.id;
+                      const isTopKingpin = index === 0;
+
+                      return (
+                        <div
+                          key={criminal.id}
+                          onClick={() => {
+                            onSelectEntity(criminal.id, false);
+                            setRightHudTab('selected');
+                          }}
+                          className={`p-3 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between space-y-2 hover:scale-[1.01] ${
+                            isCurrent
+                              ? 'bg-cyan-500/15 border-cyan-500/60 shadow-lg shadow-cyan-950/60 ring-1 ring-cyan-500/40'
+                              : isTopKingpin
+                              ? 'bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/40 shadow-sm'
+                              : 'bg-slate-950/80 hover:bg-slate-900/90 border-slate-800/90 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-1.5">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center space-x-1.5 mb-1">
+                                {isTopKingpin ? (
+                                  <span className="flex items-center space-x-1 px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-[10px] font-mono font-black text-amber-300">
+                                    <Crown className="w-3 h-3 text-amber-400" />
+                                    <span>#1 KINGPIN</span>
+                                  </span>
+                                ) : index === 1 ? (
+                                  <span className="px-2 py-0.5 rounded-md bg-sky-500/20 border border-sky-500/40 text-[10px] font-mono font-black text-sky-300">
+                                    #2 LIEUTENANT
+                                  </span>
+                                ) : index === 2 ? (
+                                  <span className="px-2 py-0.5 rounded-md bg-amber-700/20 border border-amber-600/40 text-[10px] font-mono font-black text-amber-200">
+                                    #3 CELL LEAD
+                                  </span>
+                                ) : (
+                                  <span className="px-1.5 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-[10px] font-mono font-bold text-slate-400">
+                                    #{index + 1}
+                                  </span>
+                                )}
+                                {isCurrent && (
+                                  <span className="flex items-center space-x-1 px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 text-[10px] font-mono font-bold">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                                    <span>Active In 3D</span>
+                                  </span>
+                                )}
+                              </div>
+                              <h5 className="font-bold text-sm text-white truncate">
+                                {criminal.name}
+                              </h5>
+                              <p className="text-xs text-slate-400 truncate mt-0.5">
+                                {criminal.role}
+                              </p>
+                            </div>
+
+                            <div className="text-right shrink-0">
+                              <span className="text-xs font-mono font-bold text-cyan-400 block">
+                                {criminal.betweenness.toFixed(3)}
+                              </span>
+                              <span className="text-[10px] font-mono text-slate-500">
+                                {criminal.degree} links
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Centrality Threat Bar */}
+                          <div className="space-y-1">
+                            <div className="w-full h-1.5 bg-slate-800/80 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all duration-500 ${
+                                  isTopKingpin
+                                    ? 'bg-gradient-to-r from-amber-500 via-rose-500 to-red-500'
+                                    : 'bg-gradient-to-r from-cyan-500 to-blue-500'
+                                }`}
+                                style={{ width: `${Math.min(100, Math.max(12, criminal.betweenness * 100))}%` }}
+                              />
+                            </div>
+                            <div className="flex items-center justify-between text-[9px] font-mono text-slate-500">
+                              <span>Betweenness Centrality</span>
+                              <span className="text-cyan-400/90 hover:text-cyan-300 font-sans font-semibold">
+                                Focus in 3D ↗
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* SECOND COLUMN: ACTIVE TARGET INVESTIGATION & 1-HOP RING */}
+            <div className={`space-y-3 ${rightHudTab === 'targets' ? 'lg:col-span-5' : rightHudTab === 'selected' ? 'lg:col-span-7' : 'lg:col-span-6'}`}>
+              <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-4 shadow-xl space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
+                  <div className="flex items-center space-x-2">
+                    <Crosshair className="w-4 h-4 text-cyan-400" />
+                    <h4 className="text-sm font-black text-white uppercase tracking-wider font-mono">
+                      Operational Focus & 1-Hop Ring
+                    </h4>
+                  </div>
+                  {selectedNode && (
+                    <button
+                      onClick={() => onSelectEntity(null)}
+                      className="text-xs text-slate-400 hover:text-white px-2 py-0.5 rounded-lg hover:bg-slate-800 transition font-mono cursor-pointer"
+                      title="Clear selection and restore un-dimmed view"
+                    >
+                      Clear Selection ✕
+                    </button>
+                  )}
+                </div>
+
+                {selectedNode ? (
+                  <div className="space-y-4 font-sans">
+                    
+                    {/* Previous Suspect Quick Return Link */}
+                    {previousCriminal && previousCriminal.id !== selectedNode.id && (
+                      <button
+                        onClick={() => onSelectEntity(previousCriminal.id, false)}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-2xl bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-500/40 text-xs text-indigo-200 transition shadow-sm cursor-pointer"
+                        title={`Return to previous suspect: ${previousCriminal.name}`}
+                      >
+                        <span className="flex items-center space-x-2 truncate">
+                          <ArrowLeft className="w-4 h-4 text-indigo-400 shrink-0" />
+                          <span className="truncate">
+                            ← Return to Previous Suspect: <strong className="text-white">{previousCriminal.name}</strong>
+                          </span>
+                        </span>
+                        <span className="text-[10px] text-indigo-400 font-mono shrink-0 ml-2">Quick Return ↵</span>
+                      </button>
+                    )}
+
+                    {/* Active Suspect Profile Card */}
+                    <div className="p-3.5 bg-slate-950/90 rounded-2xl border border-cyan-500/40 space-y-2">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
+                            <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                              {selectedNode.type}
+                            </span>
+                            {customPositions[selectedNode.id] && (
+                              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                                3D Pinned
+                              </span>
+                            )}
+                          </div>
+                          <h4 className="text-lg font-black text-white mt-1">
+                            {selectedNode.name}
+                          </h4>
+                          {selectedNode.attributes?.role && (
+                            <p className="text-xs text-cyan-400 font-medium">
+                              {selectedNode.attributes.role}
+                            </p>
+                          )}
+                        </div>
+
+                        <div className="text-right">
+                          <div className="text-[11px] font-mono text-slate-400">Betweenness</div>
+                          <div className="text-base font-mono font-black text-cyan-300">
+                            {Number(selectedNode.centrality?.betweenness || 0).toFixed(3)}
+                          </div>
+                          <div className="text-[10px] font-mono text-slate-500">
+                            Degree: {Number(selectedNode.centrality?.degree || 0)}
+                          </div>
+                        </div>
+                      </div>
+
+                      {customPositions[selectedNode.id] && (
+                        <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+                          <span className="text-xs text-purple-300">Custom Position Active</span>
+                          <button
+                            onClick={() => handleResetNodePosition(selectedNode.id)}
+                            className="text-xs text-purple-400 hover:text-purple-200 font-bold inline-flex items-center space-x-1 cursor-pointer"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            <span>Reset to Orbit</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Directly Attached 1-Hop Nodes */}
+                    <div>
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-300 mb-2">
+                        <span>Directly Attached Nodes ({neighborObjects.length})</span>
+                        <span className="text-[10px] text-cyan-400 font-mono font-normal">
+                          Click to focus in 3D
+                        </span>
+                      </div>
+
+                      {neighborObjects.length === 0 ? (
+                        <p className="text-xs text-slate-500 italic p-3 bg-slate-950/60 rounded-xl">
+                          No direct connections recorded for this node.
+                        </p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto pr-1 scrollbar-thin p-1">
+                          {neighborObjects.map(nb => (
+                            <button
+                              key={nb.id}
+                              onClick={() => onSelectEntity(nb.id, false)}
+                              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-cyan-500/20 text-slate-200 hover:text-cyan-200 border border-slate-800 hover:border-cyan-500/40 text-xs font-bold transition shadow-sm cursor-pointer"
+                              title={`Click to focus on ${nb.name}`}
+                            >
+                              {getTypeIcon(nb.type)}
+                              <span className="truncate max-w-[130px]">{nb.name}</span>
+                              <span className="text-[9px] font-mono text-cyan-400 opacity-90">({nb.relType})</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Relationship Evidence & Lineage */}
+                    {selectedNeighborhood.connectedLinks.length > 0 && (
+                      <div className="pt-2 border-t border-slate-800">
+                        <div className="flex items-center justify-between text-xs font-bold text-slate-300 mb-2">
+                          <span>Relationship Evidence Citations ({selectedNeighborhood.connectedLinks.length})</span>
+                          <span className="text-[10px] text-cyan-400 font-mono">Traceability</span>
+                        </div>
+                        <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1 scrollbar-thin">
+                          {selectedNeighborhood.connectedLinks.map((l, lIdx) => {
+                            const sId = typeof l.source === 'object' ? l.source?.id : l.source;
+                            const tId = typeof l.target === 'object' ? l.target?.id : l.target;
+                            const otherId = sId === selectedEntityId ? tId : sId;
+                            const otherNode = nodes.find(n => n.id === otherId);
+                            const confScore = l.confidence !== undefined ? l.confidence : 0.5;
+
+                            return (
+                              <div
+                                key={l.id || lIdx}
+                                onClick={() => setInspectedRelationship(l)}
+                                className="p-2 bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-cyan-500/40 rounded-xl flex items-center justify-between cursor-pointer transition shadow-sm"
+                                title="Click to view full relationship lineage and citation breakdown"
+                              >
+                                <div className="truncate mr-2">
+                                  <span className="text-[11px] font-mono font-bold text-cyan-400">
+                                    {l.relation_type}
+                                  </span>
+                                  <span className="text-xs text-slate-300 ml-1.5 truncate">
+                                    → {otherNode?.name || otherId}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-cyan-300 font-semibold shrink-0">
+                                  {(confScore * 100).toFixed(0)}% • Inspect Lineage 🔍
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Forensic Dossier & Deep Inspect Actions */}
+                    <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs text-slate-400">Deep forensic intelligence & dossier</span>
+                      
+                      <div className="flex items-center space-x-2">
+                        {onDeepInspect && (
+                          <button
+                            type="button"
+                            onClick={() => onDeepInspect(selectedNode.id)}
+                            className="font-black inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 text-xs transition shadow-md shadow-cyan-500/25 hover:scale-105 cursor-pointer"
+                            title="Open full-screen Deep Entity Inspection Dossier"
+                          >
+                            <Crosshair className="w-4 h-4 text-slate-950" />
+                            <span>DEEP INSPECT</span>
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => {
+                            if (onOpenDrawer) {
+                              onOpenDrawer(selectedNode.id);
+                            } else {
+                              onSelectEntity(selectedNode.id, true);
+                            }
+                          }}
+                          className={`font-bold inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl transition shadow-md cursor-pointer ${
+                            isDrawerOpen
+                              ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                              : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                          }`}
+                        >
+                          <span>{isDrawerOpen ? 'Drawer Open' : 'Open Drawer'}</span>
+                          <ChevronRight className={`w-4 h-4 transition-transform ${isDrawerOpen ? 'rotate-90 text-cyan-400' : ''}`} />
+                        </button>
+                      </div>
+                    </div>
+
+                  </div>
+                ) : (
+                  <div className="p-8 text-center space-y-3 bg-slate-950/50 rounded-2xl border border-dashed border-slate-800">
+                    <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 mx-auto">
+                      <Crosshair className="w-6 h-6 animate-pulse" />
+                    </div>
+                    <div className="space-y-1">
+                      <h5 className="text-sm font-bold text-slate-200">No Target Suspect Inspected</h5>
+                      <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                        Select any suspect from the Syndicate Target Registry or click any node in the 3D canvas above to inspect their 1-hop ring, attached evidence citations, and confidence lineage.
+                      </p>
+                    </div>
+                    {mainCriminals.length > 0 && (
+                      <button
+                        onClick={handleLocateKingpin}
+                        className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition shadow-sm cursor-pointer"
+                      >
+                        <Crown className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Inspect #1 Kingpin ({mainCriminals[0]?.name})</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+          </div>
+
+          {/* SUSPECT INSPECTION TRAIL (HISTORY AUDIT) */}
+          {historyCriminals.length > 0 && (
+            <div className="bg-slate-900/70 border border-slate-800 rounded-3xl p-4 shadow-xl space-y-3 font-sans">
+              <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5">
+                <div className="flex items-center space-x-2">
+                  <History className="w-4 h-4 text-indigo-400" />
+                  <h4 className="text-sm font-black text-white uppercase tracking-wider font-mono">
+                    Suspect Inspection Trail ({historyCriminals.length})
+                  </h4>
+                  <span className="text-[10px] font-mono text-slate-500">
+                    Chronological audit of visited suspects
+                  </span>
+                </div>
+                <button
+                  onClick={() => setHistoryCriminals([])}
+                  className="text-xs text-slate-500 hover:text-rose-400 font-mono transition cursor-pointer"
+                >
+                  Clear Trail ✕
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
+                {historyCriminals.map((item, idx) => {
+                  const isCurrent = selectedEntityId === item.id;
+                  return (
+                    <button
+                      key={`${item.id}_${idx}`}
+                      onClick={() => {
+                        onSelectEntity(item.id, false);
+                        setRightHudTab('selected');
+                      }}
+                      className={`p-2.5 rounded-2xl border text-left transition flex items-center justify-between cursor-pointer ${
+                        isCurrent
+                          ? 'bg-indigo-500/20 border-indigo-500/60 shadow-md shadow-indigo-950/50'
+                          : 'bg-slate-950/80 hover:bg-slate-900 border-slate-800/80 hover:border-slate-700 text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2 min-w-0">
+                        <span className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-[10px] font-mono font-bold text-indigo-400 shrink-0">
+                          {idx + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="font-bold text-xs truncate text-white">
+                            {item.name}
+                          </div>
+                          <div className="text-[10px] text-slate-400 truncate">
+                            {item.role}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0 ml-1">
+                        <span className="text-[10px] font-mono text-cyan-400 block">
+                          BW: {Number(item.betweenness).toFixed(3)}
+                        </span>
+                        {isCurrent ? (
+                          <span className="text-[9px] font-bold text-cyan-300">Active</span>
+                        ) : (
+                          <span className="text-[9px] text-indigo-400 hover:underline">Focus →</span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+        </div>
+      )}
+
+
+      {/* RELATIONSHIP EVIDENCE & TRACEABILITY INSPECTOR MODAL */}
+      {inspectedRelationship && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg p-6 shadow-2xl space-y-4 font-sans animate-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <span className="text-[10px] font-mono uppercase font-bold text-cyan-400">
+                  RELATIONSHIP TRACEABILITY INSPECTOR
+                </span>
+                <h3 className="text-base font-black text-slate-100 mt-0.5">
+                  {inspectedRelationship.relation_type} Connection Lineage
+                </h3>
+              </div>
+              <button
+                onClick={() => setInspectedRelationship(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Why does this relationship exist? */}
+            <div className="p-3.5 bg-cyan-950/30 border border-cyan-500/30 rounded-2xl space-y-1">
+              <div className="text-[11px] font-mono font-bold text-cyan-400 uppercase">
+                Why does this relationship exist?
+              </div>
+              <p className="text-xs text-slate-200 leading-relaxed">
+                Documented link between{' '}
+                <span className="font-bold text-cyan-300">
+                  {nodes.find(n => n.id === (typeof inspectedRelationship.source === 'object' ? inspectedRelationship.source.id : inspectedRelationship.source))?.name || inspectedRelationship.source}
+                </span>{' '}
+                and{' '}
+                <span className="font-bold text-cyan-300">
+                  {nodes.find(n => n.id === (typeof inspectedRelationship.target === 'object' ? inspectedRelationship.target.id : inspectedRelationship.target))?.name || inspectedRelationship.target}
+                </span>.
+              </p>
+            </div>
+
+            {/* Confidence Score Bar & Breakdown */}
+            <div className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between text-xs font-mono">
+                <span className="text-slate-400">Evidence Confidence Score:</span>
+                <span className="font-bold text-cyan-300">
+                  {((inspectedRelationship.confidence !== undefined ? inspectedRelationship.confidence : 0.5) * 100).toFixed(0)}% • {inspectedRelationship.confidence_label || 'Moderate'}
+                </span>
+              </div>
+              <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-gradient-to-r from-cyan-500 to-emerald-400 h-full rounded-full transition-all"
+                  style={{ width: `${(inspectedRelationship.confidence !== undefined ? inspectedRelationship.confidence : 0.5) * 100}%` }}
+                />
+              </div>
+              {inspectedRelationship.confidence_reasons && inspectedRelationship.confidence_reasons.length > 0 && (
+                <div className="pt-2 text-[11px] text-slate-400 space-y-1 font-mono">
+                  <div className="text-slate-500 text-[10px] uppercase font-bold">Scoring Factors:</div>
+                  {inspectedRelationship.confidence_reasons.map((r, rIdx) => (
+                    <div key={rIdx} className="text-slate-300">• {r}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Evidence Quotes / Citations */}
+            {inspectedRelationship.evidence && inspectedRelationship.evidence.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="text-[11px] font-mono uppercase font-semibold text-slate-400">Evidence Citations</div>
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs text-slate-300 space-y-1 max-h-28 overflow-y-auto">
+                  {inspectedRelationship.evidence.map((ev, evIdx) => (
+                    <div key={evIdx} className="italic text-slate-200">"{ev}"</div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Metadata (File, Evidence ID, Validation Status) */}
+            <div className="grid grid-cols-2 gap-2 text-[11px] font-mono text-slate-400 pt-1">
+              <div className="p-2 bg-slate-950 rounded-lg border border-slate-800">
+                <span className="text-slate-500 block text-[9px] uppercase">Source Artifact</span>
+                <span className="text-slate-200 truncate block">{inspectedRelationship.source_file || 'Ingested Stream'}</span>
+              </div>
+              <div className="p-2 bg-slate-950 rounded-lg border border-slate-800">
+                <span className="text-slate-500 block text-[9px] uppercase">Validation Status</span>
+                <span className="text-emerald-400 font-bold block">{inspectedRelationship.validation_status || 'Valid'}</span>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setInspectedRelationship(null)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition cursor-pointer"
+              >
+                Close Inspector
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

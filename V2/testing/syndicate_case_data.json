@@ -1,0 +1,83 @@
+{
+  "investigation_id": "CASE-2026-MUM-SYND-01",
+  "crime_type": "Organized Crime / Narcotics Smuggling / Hawala Money Laundering",
+  "entities": [
+    {
+      "id": "p101",
+      "type": "Person",
+      "name": "Vikram 'Ghost' Singhania",
+      "role": "Kingpin & Strategic Broker",
+      "category": "Syndicate Mastermind",
+      "phone": "+91-98765-43210",
+      "jurisdiction": "International"
+    },
+    {
+      "id": "p102",
+      "type": "Person",
+      "name": "Rajesh Shrestha",
+      "role": "Hawala Mastermind & Conduit",
+      "category": "Offshore Banker",
+      "phone": "+971-50-1122334",
+      "jurisdiction": "UAE-India"
+    },
+    {
+      "id": "p104",
+      "type": "Person",
+      "name": "Sanjay 'Kabir' Patel",
+      "role": "Narcotics Logistics Lead",
+      "category": "Operations Chief",
+      "phone": "+91-98765-43210",
+      "jurisdiction": "Gujarat-Maharashtra"
+    },
+    {
+      "id": "p107",
+      "type": "Person",
+      "name": "Devendra 'Dev' Joshi",
+      "role": "Port Customs Facilitator",
+      "category": "Customs Insider",
+      "phone": "+91-98200-11223",
+      "jurisdiction": "Nhava Sheva"
+    },
+    {
+      "id": "loc101",
+      "type": "Location",
+      "name": "Dock 14 Container Terminal Nhava Sheva",
+      "facility_type": "Maritime Commercial Port",
+      "security": "Tier-1 Port Customs Border Gate"
+    },
+    {
+      "id": "loc104",
+      "type": "Location",
+      "name": "Warehouse 3A Industrial Park Bhiwandi",
+      "facility_type": "Consignment Staging Depot",
+      "security": "Gated Private Industrial Depot"
+    }
+  ],
+  "relationships_and_events": [
+    {
+      "source": "p101",
+      "target": "p102",
+      "relation_type": "KNOWS",
+      "amount": "₹ 19.95 Cr",
+      "method": "Hawala Settlement Clearance",
+      "timestamp": "2026-03-12T09:15:00Z",
+      "evidence": "Encrypted wiretap recorded Vikram directing Rajesh on hawala transfer"
+    },
+    {
+      "source": "p104",
+      "target": "p107",
+      "relation_type": "KNOWS",
+      "amount": "₹ 50 Lakhs",
+      "method": "Cash Bribery",
+      "timestamp": "2026-03-13T17:45:00Z",
+      "evidence": "Intercepted communications show Sanjay bribing Devendra Joshi to bypass scanner gate"
+    },
+    {
+      "source": "p106",
+      "target": "loc104",
+      "relation_type": "LOCATED_AT",
+      "timestamp": "2026-03-14T02:30:00Z",
+      "evidence": "Tariq delivered palletized narcotics consignments to Bhiwandi Warehouse 3A"
+    }
+  ]
+}

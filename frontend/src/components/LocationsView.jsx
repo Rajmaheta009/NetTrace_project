@@ -70,18 +70,22 @@ export default function LocationsView({
   const filteredLocations = useMemo(() => {
     return locations.filter(l => {
       const q = searchQuery.toLowerCase();
-      const match = l.name.toLowerCase().includes(q) ||
-                    l.facilityType.toLowerCase().includes(q) ||
-                    l.visitors.some(v => v.name.toLowerCase().includes(q));
+      const lName = (l.name || l.id || '').toLowerCase();
+      const facType = (l.facilityType || '').toLowerCase();
+      const sec = (l.security || '').toLowerCase();
+      const match = lName.includes(q) ||
+                    facType.includes(q) ||
+                    sec.includes(q) ||
+                    (l.visitors || []).some(v => (v?.name || v?.id || '').toLowerCase().includes(q));
       
-      if (filterType === 'SAFEDOCKS') return match && (l.facilityType.toLowerCase().includes('port') || l.facilityType.toLowerCase().includes('safehouse'));
-      if (filterType === 'MEETING') return match && l.facilityType.toLowerCase().includes('meeting');
+      if (filterType === 'SAFEDOCKS') return match && (facType.includes('port') || facType.includes('safehouse'));
+      if (filterType === 'MEETING') return match && facType.includes('meeting');
       return match;
     });
   }, [locations, searchQuery, filterType]);
 
   const safehouseCount = useMemo(() => {
-    return locations.filter(l => l.facilityType.toLowerCase().includes('safehouse')).length;
+    return locations.filter(l => (l.facilityType || '').toLowerCase().includes('safehouse')).length;
   }, [locations]);
 
   const securedCount = useMemo(() => {

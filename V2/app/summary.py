@@ -44,7 +44,7 @@ def generate_summary(
     ]
     payload = {
         "top_entities": top_entities,
-        "pattern_flags": [f.model_dump() for f in pattern_flags],
+        "pattern_flags": [f.model_dump() for f in pattern_flags[:10]],
     }
 
     try:

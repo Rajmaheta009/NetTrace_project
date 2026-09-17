@@ -1,8 +1,25 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Navbar from './components/Navbar';
+import Sidebar from './components/Sidebar';
 import CommandHUD from './components/CommandHUD';
 import GraphView from './components/GraphView';
 import EntityDrawer from './components/EntityDrawer';
+import DeepEntityInspection from './components/DeepEntityInspection';
+import { CaseSwitcherModal } from './components/CaseRoleModals';
+import HistoryRecordsModal from './components/HistoryRecordsModal';
+
+// Core & Forensic Views
+import DashboardOverview from './components/DashboardOverview';
+import CasesView from './components/CasesView';
+import EvidenceView from './components/EvidenceView';
+import ValidationCenter from './components/ValidationCenter';
+import CommunitiesView from './components/CommunitiesView';
+import ConnectionFinderView from './components/ConnectionFinderView';
+import NotesView from './components/NotesView';
+import ReportsView from './components/ReportsView';
+import AuditView from './components/AuditView';
+
+// Vector Views
 import VehiclesView from './components/VehiclesView';
 import TelecomView from './components/TelecomView';
 import FinancialView from './components/FinancialView';
@@ -22,18 +39,46 @@ import {
   fetchEntityDetail, 
   resetGraph,
   clearGraph,
-  loadDemoGraph
+  loadDemoGraph,
+  fetchActiveCase,
+  fetchCurrentUser,
+  fetchEvidence,
+  fetchValidationRecords,
+  fetchCommunities,
+  fetchNotes,
+  fetchCrimeProfiles,
+  updateCaseInvestigationType
 } from './services/api';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('graph');
-  const [theme, setTheme] = useState('midnight'); // 'midnight' | 'dark' | 'light'
+  const [theme, setTheme] = useState('midnight');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   
+  // Case & RBAC State
+  const [activeCase, setActiveCase] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [crimeProfiles, setCrimeProfiles] = useState([]);
+  const [deepInspectEntityId, setDeepInspectEntityId] = useState(null);
+  const [isCaseModalOpen, setIsCaseModalOpen] = useState(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+
+  // Investigation Data State
   const [health, setHealth] = useState(null);
   const [graphData, setGraphData] = useState({ nodes: [], links: [] });
   const [centralityList, setCentralityList] = useState([]);
   const [patternFlags, setPatternFlags] = useState([]);
   const [summaryData, setSummaryData] = useState(null);
+  const [evidenceList, setEvidenceList] = useState([]);
+  const [validationQueue, setValidationQueue] = useState([]);
+  const [communities, setCommunities] = useState([]);
+  const [notesList, setNotesList] = useState([]);
+
+  // Active Cross-View Highlights in 3D Orbit
+  const [highlightedCommunity, setHighlightedCommunity] = useState(null);
+  const [highlightedPath, setHighlightedPath] = useState(null);
+
+  // Inspector & Drawer State
   const [selectedEntityId, setSelectedEntityId] = useState(null);
   const [entityDetail, setEntityDetail] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -42,6 +87,7 @@ export default function App() {
   const [drawerLoading, setDrawerLoading] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [isCommandOpen, setIsCommandOpen] = useState(false);
+  const selectedEntityRef = useRef(null);
 
   // Apply Theme to <html>
   useEffect(() => {
@@ -50,7 +96,7 @@ export default function App() {
     root.classList.add(theme);
   }, [theme]);
 
-  // Global Keyboard Shortcut: Ctrl+K or Cmd+K for Spotlight Search
+  // Global Keyboard Shortcut: Ctrl+K or Cmd+K
   useEffect(() => {
     const handleGlobalKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
@@ -62,25 +108,39 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, []);
 
-  // Load all graph intelligence data
+  // Load all investigation data for the active case
   const loadAllData = useCallback(async () => {
     try {
-      const [h, g, c, p] = await Promise.all([
+      const [h, g, c, p, activeC, curUser, ev, val, comms, nts, cProfiles] = await Promise.all([
         checkHealth().catch(() => null),
         fetchGraph().catch(() => ({ nodes: [], links: [] })),
         fetchCentrality().catch(() => []),
         fetchPatterns().catch(() => []),
+        fetchActiveCase().catch(() => null),
+        fetchCurrentUser().catch(() => null),
+        fetchEvidence().catch(() => []),
+        fetchValidationRecords().catch(() => []),
+        fetchCommunities().catch(() => []),
+        fetchNotes().catch(() => []),
+        fetchCrimeProfiles().catch(() => []),
       ]);
       setHealth(h);
       setGraphData(g);
       setCentralityList(c);
       setPatternFlags(p);
+      if (activeC) setActiveCase(activeC);
+      if (curUser) setCurrentUser(curUser);
+      setEvidenceList(ev);
+      setValidationQueue(val);
+      setCommunities(comms);
+      setNotesList(nts);
+      if (cProfiles && cProfiles.length) setCrimeProfiles(cProfiles);
     } catch (err) {
-      console.error('Failed to load initial data:', err);
+      console.error('Failed to load initial investigation data:', err);
     }
   }, []);
 
-  // Initial mount & polling
+  // Initial mount & telemetry polling
   useEffect(() => {
     loadAllData();
     const interval = setInterval(() => {
@@ -89,8 +149,9 @@ export default function App() {
     return () => clearInterval(interval);
   }, [loadAllData]);
 
-  // Handle Entity selection & forensic side drawer opening
+  // Entity selection & forensic side drawer opening
   const handleSelectEntity = async (entityId, shouldOpenDrawer = true) => {
+    selectedEntityRef.current = entityId;
     if (!entityId) {
       setSelectedEntityId(null);
       setEntityDetail(null);
@@ -106,10 +167,12 @@ export default function App() {
 
     try {
       const detail = await fetchEntityDetail(entityId);
-      setEntityDetail(detail);
+      if (selectedEntityRef.current === entityId) {
+        setEntityDetail(detail);
+      }
     } catch (err) {
-      console.warn('Backend entity detail fetch failed, using resilient local graph fallback:', err);
-      // Resilient Fallback: construct full entity dossier directly from client graphData
+      if (selectedEntityRef.current !== entityId) return;
+      console.warn('Backend entity detail fetch failed, using local graph fallback:', err);
       const node = (graphData.nodes || []).find(n => n.id === entityId);
       if (node) {
         const conns = (graphData.links || [])
@@ -138,11 +201,12 @@ export default function App() {
         });
       }
     } finally {
-      setDrawerLoading(false);
+      if (selectedEntityRef.current === entityId) {
+        setDrawerLoading(false);
+      }
     }
   };
 
-  // Explicitly Open Forensic Dossier Side Drawer for Target Node
   const handleOpenDrawer = (entityId) => {
     const targetId = entityId || selectedEntityId;
     if (targetId) {
@@ -150,19 +214,56 @@ export default function App() {
     }
   };
 
-  // Cross-Tab Redirection to 3D Graph
+  // Cross-Tab Redirections to 3D Graph
   const handleNavigateToGraph = (entityId) => {
     setActiveTab('graph');
-    handleSelectEntity(entityId, true);
+    if (entityId) {
+      handleSelectEntity(entityId, true);
+    }
+  };
+
+  const handleHighlightCommunityInGraph = (communityName) => {
+    setHighlightedCommunity(communityName);
+    setActiveTab('graph');
+  };
+
+  const handleHighlightPathInGraph = (nodeIds) => {
+    setHighlightedPath(nodeIds);
+    setActiveTab('graph');
+  };
+
+  // Case Switch Callback
+  const handleSwitchCrimeProfile = async (profileId) => {
+    if (!activeCase?.case_id) return;
+    try {
+      const updated = await updateCaseInvestigationType(activeCase.case_id, profileId);
+      setActiveCase(updated);
+      await loadAllData();
+    } catch (err) {
+      console.error('Failed to switch crime profile:', err);
+    }
+  };
+
+  const handleOpenDeepInspect = (entityId) => {
+    setDeepInspectEntityId(entityId);
+  };
+
+  const handleCaseSwitched = async (newCaseId) => {
+    setSelectedEntityId(null);
+    setEntityDetail(null);
+    setIsDrawerOpen(false);
+    setHighlightedCommunity(null);
+    setHighlightedPath(null);
+    await loadAllData();
   };
 
   // Reset graph: clear all memory data and empty diagram completely
   const handleReset = async () => {
-    // 1. Immediately wipe local UI state so the diagram empties with zero delay
+    if (loading) return;
     setSelectedEntityId(null);
+    selectedEntityRef.current = null;
     setEntityDetail(null);
     setIsDrawerOpen(false);
-    setEntityDetail(null);
     setGraphData({ nodes: [], links: [] });
     setCentralityList([]);
     setPatternFlags([]);
@@ -171,12 +272,12 @@ export default function App() {
       entities_to_watch: []
     });
 
-    // 2. Synchronize with backend quietly in background without any blocking alert pop-up
     setLoading(true);
     try {
       await clearGraph();
+      await loadAllData();
     } catch (err) {
-      console.warn('Backend graph clear warning (offline or unreachable):', err.message);
+      console.warn('Backend graph clear warning:', err.message);
     } finally {
       setLoading(false);
     }
@@ -184,40 +285,14 @@ export default function App() {
 
   // Load sample demo case
   const handleLoadDemo = async () => {
+    if (loading) return;
     setLoading(true);
     try {
       await loadDemoGraph();
       await loadAllData();
       loadSummary();
     } catch (err) {
-      console.warn('Backend demo load failed (offline or unreachable):', err.message);
-      // Graceful offline fallback: load built-in sample demo nodes directly into state
-      setGraphData({
-        nodes: [
-          { id: 'e1', type: 'Person', name: 'Rakesh Verma', aliases: ['The Broker'], attributes: { phone: '+91-9876543210' }, centrality: { degree: 1.0, betweenness: 0.9 }, source_refs: ['sample'] },
-          { id: 'e2', type: 'Person', name: 'Sanjay Patel', aliases: [], attributes: { phone: '+91-9123456789' }, centrality: { degree: 0.8, betweenness: 0.3 }, source_refs: ['sample'] },
-          { id: 'e3', type: 'Vehicle', name: 'MH-04-AB-1234', aliases: [], attributes: { plate: 'MH-04-AB-1234' }, centrality: { degree: 0.4, betweenness: 0.0 }, source_refs: ['sample'] },
-          { id: 'e4', type: 'Location', name: 'Cafe Coastal Mumbai', aliases: [], attributes: { city: 'Mumbai' }, centrality: { degree: 0.6, betweenness: 0.1 }, source_refs: ['sample'] },
-          { id: 'e5', type: 'Person', name: 'Anita Rao', aliases: [], attributes: {}, centrality: { degree: 0.4, betweenness: 0.0 }, source_refs: ['sample'] },
-          { id: 'e6', type: 'Organization', name: 'Coastal Traders Pvt Ltd', aliases: [], attributes: {}, centrality: { degree: 0.4, betweenness: 0.0 }, source_refs: ['sample'] }
-        ],
-        links: [
-          { source: 'e1', target: 'e2', relation_type: 'KNOWS', weight: 1, evidence: ['Wiretap log'] },
-          { source: 'e1', target: 'e3', relation_type: 'OWNS_VEHICLE', weight: 1, evidence: ['RTO registration'] },
-          { source: 'e1', target: 'e4', relation_type: 'MET_AT', weight: 1, evidence: ['Surveillance log'] },
-          { source: 'e2', target: 'e4', relation_type: 'MET_AT', weight: 1, evidence: ['Surveillance log'] },
-          { source: 'e5', target: 'e6', relation_type: 'MEMBER_OF', weight: 1, evidence: ['Corporate registry'] },
-          { source: 'e1', target: 'e5', relation_type: 'KNOWS', weight: 1, evidence: ['Call logs'] }
-        ]
-      });
-      setCentralityList([
-        { id: 'e1', name: 'Rakesh Verma', degree: 1.0, betweenness: 0.9 },
-        { id: 'e2', name: 'Sanjay Patel', degree: 0.8, betweenness: 0.3 },
-        { id: 'e4', name: 'Cafe Coastal Mumbai', degree: 0.6, betweenness: 0.1 },
-        { id: 'e3', name: 'MH-04-AB-1234', degree: 0.4, betweenness: 0.0 },
-        { id: 'e5', name: 'Anita Rao', degree: 0.4, betweenness: 0.0 },
-        { id: 'e6', name: 'Coastal Traders Pvt Ltd', degree: 0.4, betweenness: 0.0 }
-      ]);
+      console.warn('Backend demo load failed:', err.message);
     } finally {
       setLoading(false);
     }
@@ -242,29 +317,21 @@ export default function App() {
     }
   }, [activeTab, summaryData, summaryLoading]);
 
-  // Derived Category Counts for Navigation Badges
-  const vehicleCount = useMemo(() => {
-    return graphData.nodes?.filter(n => n.type === 'Vehicle').length || 0;
-  }, [graphData]);
-
+  // Derived Category Counts
+  const vehicleCount = useMemo(() => graphData.nodes?.filter(n => n.type === 'Vehicle').length || 0, [graphData]);
   const telecomCount = useMemo(() => {
     const direct = graphData.nodes?.filter(n => n.type === 'PhoneNumber').length || 0;
     const fromPersons = graphData.nodes?.filter(n => n.type === 'Person' && n.attributes?.phone).length || 0;
     return direct > 0 ? direct : fromPersons;
   }, [graphData]);
-
-  const financialCount = useMemo(() => {
-    return graphData.nodes?.filter(n => n.type === 'Organization').length || 0;
-  }, [graphData]);
-
-  const locationCount = useMemo(() => {
-    return graphData.nodes?.filter(n => n.type === 'Location').length || 0;
-  }, [graphData]);
+  const financialCount = useMemo(() => graphData.nodes?.filter(n => n.type === 'Organization').length || 0, [graphData]);
+  const locationCount = useMemo(() => graphData.nodes?.filter(n => n.type === 'Location').length || 0, [graphData]);
+  const pendingValidationCount = useMemo(() => validationQueue.filter(v => v.status === 'Needs Review').length, [validationQueue]);
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] flex flex-col antialiased transition-colors duration-300">
       
-      {/* Top Header & Navigation */}
+      {/* Top Navbar */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -281,100 +348,210 @@ export default function App() {
         theme={theme}
         setTheme={setTheme}
         onOpenCommandHUD={() => setIsCommandOpen(true)}
+        activeCase={activeCase}
+        currentUser={currentUser}
+        onOpenCaseModal={() => setIsCaseModalOpen(true)}
+        onOpenHistoryModal={() => setIsHistoryModalOpen(true)}
+        sidebarCollapsed={sidebarCollapsed}
+        setSidebarCollapsed={setSidebarCollapsed}
       />
 
-      {/* Main Content Area - Non-overlapping responsive layout */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-5 lg:p-6">
-        {activeTab === 'graph' && (
-          <GraphView
-            graphData={graphData}
-            selectedEntityId={selectedEntityId}
-            onSelectEntity={handleSelectEntity}
-            isDrawerOpen={isDrawerOpen}
-            onOpenDrawer={handleOpenDrawer}
-            onRefresh={loadAllData}
-            onOpenIngest={() => setActiveTab('ingest')}
-            onLoadDemo={handleLoadDemo}
-            theme={theme}
-          />
-        )}
+      {/* Main Workspace Layout (Sidebar + Center Content) */}
+      <div className="flex-1 flex overflow-hidden">
+        
+        {/* Modern Collapsible Left Sidebar */}
+        <Sidebar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          activeCase={activeCase}
+          currentUser={currentUser}
+          onOpenHistoryModal={() => setIsHistoryModalOpen(true)}
+          onOpenCaseModal={() => setIsCaseModalOpen(true)}
+          validationCount={pendingValidationCount}
+          evidenceCount={evidenceList.length}
+          patternCount={patternFlags.length}
+          notesCount={notesList.length}
+          collapsed={sidebarCollapsed}
+          setCollapsed={setSidebarCollapsed}
+        />
 
-        {activeTab === 'vehicles' && (
-          <VehiclesView
-            graphData={graphData}
-            patterns={patternFlags}
-            onInspectEntity={handleSelectEntity}
-            onNavigateToGraph={handleNavigateToGraph}
-          />
-        )}
+        {/* Viewport Main Container */}
+        <main className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-6">
+          <div className="max-w-7xl mx-auto">
+            
+            {activeTab === 'dashboard' && (
+              <DashboardOverview
+                activeCase={activeCase}
+                graphData={graphData}
+                centralityList={centralityList}
+                patternFlags={patternFlags}
+                evidenceList={evidenceList}
+                validationQueue={validationQueue}
+                communities={communities}
+                crimeProfiles={crimeProfiles}
+                activeProfileId={activeCase?.investigation_type || 'organized_crime'}
+                onSelectProfile={handleSwitchCrimeProfile}
+                onNavigate={(tab) => setActiveTab(tab)}
+                onInspectEntity={handleNavigateToGraph}
+                onDeepInspect={handleOpenDeepInspect}
+              />
+            )}
 
-        {activeTab === 'telecom' && (
-          <TelecomView
-            graphData={graphData}
-            patterns={patternFlags}
-            onInspectEntity={handleSelectEntity}
-            onNavigateToGraph={handleNavigateToGraph}
-          />
-        )}
+            {activeTab === 'graph' && (
+              <GraphView
+                graphData={graphData}
+                selectedEntityId={selectedEntityId}
+                onSelectEntity={handleSelectEntity}
+                isDrawerOpen={isDrawerOpen}
+                onOpenDrawer={handleOpenDrawer}
+                onDeepInspect={handleOpenDeepInspect}
+                crimeProfile={crimeProfiles.find(p => p.id === (activeCase?.investigation_type || 'organized_crime'))}
+                onRefresh={loadAllData}
+                onOpenIngest={() => setActiveTab('ingest')}
+                onLoadDemo={handleLoadDemo}
+                theme={theme}
+                highlightedCommunity={highlightedCommunity}
+                onClearCommunityHighlight={() => setHighlightedCommunity(null)}
+                highlightedPath={highlightedPath}
+                onClearPathHighlight={() => setHighlightedPath(null)}
+              />
+            )}
 
-        {activeTab === 'financial' && (
-          <FinancialView
-            graphData={graphData}
-            patterns={patternFlags}
-            onInspectEntity={handleSelectEntity}
-            onNavigateToGraph={handleNavigateToGraph}
-          />
-        )}
+            {activeTab === 'cases' && (
+              <CasesView
+                activeCase={activeCase}
+                onCaseSwitched={handleCaseSwitched}
+              />
+            )}
 
-        {activeTab === 'locations' && (
-          <LocationsView
-            graphData={graphData}
-            onInspectEntity={handleSelectEntity}
-            onNavigateToGraph={handleNavigateToGraph}
-          />
-        )}
+            {activeTab === 'evidence' && (
+              <EvidenceView
+                activeCase={activeCase}
+              />
+            )}
 
-        {activeTab === 'timeline' && (
-          <TimelineView
-            graphData={graphData}
-            onNavigateToGraph={handleNavigateToGraph}
-          />
-        )}
+            {activeTab === 'validation' && (
+              <ValidationCenter
+                activeCase={activeCase}
+                graphData={graphData}
+                onReviewCompleted={loadAllData}
+                onDeepInspect={handleOpenDeepInspect}
+              />
+            )}
 
-        {activeTab === 'centrality' && (
-          <CentralityTable
-            centralityData={centralityList}
-            onInspectEntity={handleNavigateToGraph}
-          />
-        )}
+            {activeTab === 'communities' && (
+              <CommunitiesView
+                activeCase={activeCase}
+                onHighlightInGraph={handleHighlightCommunityInGraph}
+              />
+            )}
 
-        {activeTab === 'patterns' && (
-          <PatternsRadar
-            patterns={patternFlags}
-            onSelectEntity={handleNavigateToGraph}
-          />
-        )}
+            {activeTab === 'connections' && (
+              <ConnectionFinderView
+                activeCase={activeCase}
+                graphData={graphData}
+                onHighlightPathInGraph={handleHighlightPathInGraph}
+              />
+            )}
 
-        {activeTab === 'summary' && (
-          <SummaryView
-            summaryData={summaryData}
-            loading={summaryLoading}
-            onRefresh={loadSummary}
-            onInspectEntity={handleNavigateToGraph}
-          />
-        )}
+            {activeTab === 'notes' && (
+              <NotesView
+                activeCase={activeCase}
+                graphData={graphData}
+              />
+            )}
 
-        {activeTab === 'ingest' && (
-          <IngestPanel
-            onIngestSuccess={() => {
-              loadAllData();
-              setSummaryData(null);
-            }}
-          />
-        )}
-      </main>
+            {activeTab === 'reports' && (
+              <ReportsView
+                activeCase={activeCase}
+              />
+            )}
 
-      {/* Spotlight Command HUD Search Palette (Ctrl+K) */}
+            {activeTab === 'audit' && (
+              <AuditView />
+            )}
+
+            {activeTab === 'vehicles' && (
+              <VehiclesView
+                graphData={graphData}
+                patterns={patternFlags}
+                onInspectEntity={handleSelectEntity}
+                onNavigateToGraph={handleNavigateToGraph}
+              />
+            )}
+
+            {activeTab === 'telecom' && (
+              <TelecomView
+                graphData={graphData}
+                patterns={patternFlags}
+                onInspectEntity={handleSelectEntity}
+                onNavigateToGraph={handleNavigateToGraph}
+              />
+            )}
+
+            {activeTab === 'financial' && (
+              <FinancialView
+                graphData={graphData}
+                patterns={patternFlags}
+                onInspectEntity={handleSelectEntity}
+                onNavigateToGraph={handleNavigateToGraph}
+              />
+            )}
+
+            {activeTab === 'locations' && (
+              <LocationsView
+                graphData={graphData}
+                onInspectEntity={handleSelectEntity}
+                onNavigateToGraph={handleNavigateToGraph}
+              />
+            )}
+
+            {activeTab === 'timeline' && (
+              <TimelineView
+                graphData={graphData}
+                onNavigateToGraph={handleNavigateToGraph}
+                onInspectEntity={handleOpenDeepInspect}
+              />
+            )}
+
+            {activeTab === 'centrality' && (
+              <CentralityTable
+                centralityData={centralityList}
+                onInspectEntity={handleNavigateToGraph}
+              />
+            )}
+
+            {activeTab === 'patterns' && (
+              <PatternsRadar
+                patterns={patternFlags}
+                onSelectEntity={handleNavigateToGraph}
+              />
+            )}
+
+            {activeTab === 'summary' && (
+              <SummaryView
+                summaryData={summaryData}
+                loading={summaryLoading}
+                onRefresh={loadSummary}
+                onInspectEntity={handleNavigateToGraph}
+              />
+            )}
+
+            {activeTab === 'ingest' && (
+              <IngestPanel
+                onIngestSuccess={() => {
+                  loadAllData();
+                  setSummaryData(null);
+                }}
+              />
+            )}
+
+          </div>
+        </main>
+
+      </div>
+
+      {/* Spotlight Command HUD (Ctrl+K) */}
       <CommandHUD
         isOpen={isCommandOpen}
         onClose={() => setIsCommandOpen(false)}
@@ -383,10 +560,23 @@ export default function App() {
         onSelectEntity={handleSelectEntity}
         onNavigateToGraph={handleNavigateToGraph}
         onOpenIngest={() => setActiveTab('ingest')}
-              onLoadDemo={handleLoadDemo}
+        onLoadDemo={handleLoadDemo}
       />
 
-      {/* Entity Inspector Side Drawer with Non-Overlapping Dismiss */}
+      {/* Full-Spectrum Deep Entity Inspection Modal */}
+      {deepInspectEntityId && (
+        <DeepEntityInspection
+          caseId={activeCase?.case_id || 'case-001'}
+          entityId={deepInspectEntityId}
+          onClose={() => setDeepInspectEntityId(null)}
+          allEntities={graphData.nodes || []}
+          onHighlightCommunity={handleHighlightCommunityInGraph}
+          onHighlightPath={handleHighlightPathInGraph}
+          onSelectEntity={handleSelectEntity}
+        />
+      )}
+
+      {/* Forensic Entity Inspector Side Drawer */}
       <EntityDrawer
         isOpen={isDrawerOpen}
         entityDetail={entityDetail}
@@ -396,11 +586,34 @@ export default function App() {
         onOpenVehiclesTab={() => setActiveTab('vehicles')}
       />
 
+      {/* Case Switcher Modal */}
+      <CaseSwitcherModal
+        isOpen={isCaseModalOpen}
+        onClose={() => setIsCaseModalOpen(false)}
+        activeCase={activeCase}
+        onCaseSwitched={handleCaseSwitched}
+      />
+
+      {/* Investigation History & Previous Records Modal */}
+      <HistoryRecordsModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+        onInspectEntity={handleOpenDeepInspect}
+        onNavigate={(tab) => {
+          setActiveTab(tab);
+          setIsHistoryModalOpen(false);
+        }}
+      />
+
       {/* Tactical Footer */}
       <footer className="border-t border-slate-800/60 py-3 px-6 text-center text-[11px] text-slate-500 font-mono flex items-center justify-between">
-        <span>NetTrace AI v2.0 • Multi-Vector AI-Powered Criminal Network Analysis</span>
-        <span className="hidden sm:inline text-cyan-500/70">Press <kbd className="text-slate-400 font-bold px-1 bg-slate-900 border border-slate-800 rounded">Ctrl</kbd> + <kbd className="text-slate-400 font-bold px-1 bg-slate-900 border border-slate-800 rounded">K</kbd> for Global Spotlight</span>
-        <span className="text-emerald-400/80">Deterministic Engine Active</span>
+        <span>NetTrace Intelligence v2.0 • Deterministic NetworkX MultiDiGraph Engine</span>
+        <span className="hidden sm:inline text-cyan-500/70">
+          Press <kbd className="text-slate-400 font-bold px-1 bg-slate-900 border border-slate-800 rounded">Ctrl</kbd> + <kbd className="text-slate-400 font-bold px-1 bg-slate-900 border border-slate-800 rounded">K</kbd> for Global Spotlight
+        </span>
+        <span className="text-emerald-400/80">
+          Case: {activeCase?.case_id || 'case-001'} (Lead Investigator)
+        </span>
       </footer>
 
     </div>

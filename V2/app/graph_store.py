@@ -12,7 +12,7 @@ from typing import Dict, List, Optional
 
 import networkx as nx
 
-from app.models import Entity, GraphLinkOut, GraphNodeOut, GraphResponse, Relationship
+from app.models import Entity, EntityType, GraphLinkOut, GraphNodeOut, GraphResponse, Relationship
 
 
 def _normalize(text: str) -> str:
@@ -47,9 +47,6 @@ class GraphStore:
             if existing.type == candidate.type:
                 if _normalize(existing.name) == cand_name:
                     return existing.id
-                existing_phone = existing.attributes.get("phone")
-                if cand_phone and existing_phone and _normalize(existing_phone) == cand_phone:
-                    return existing.id
                 # Check if candidate name is in existing aliases
                 existing_aliases = {_normalize(a) for a in existing.aliases}
                 if cand_name in existing_aliases:
@@ -58,6 +55,17 @@ class GraphStore:
                 cand_aliases = {_normalize(a) for a in candidate.aliases}
                 if _normalize(existing.name) in cand_aliases:
                     return existing.id
+                # For PhoneNumber entities, match by normalized number
+                if candidate.type == EntityType.PHONE_NUMBER and cand_phone:
+                    existing_phone = existing.attributes.get("phone") or existing.name
+                    if existing_phone and _normalize(existing_phone) == cand_phone:
+                        return existing.id
+                # For Vehicle entities, match by normalized plate
+                if candidate.type == EntityType.VEHICLE:
+                    cand_plate = candidate.attributes.get("plate") or candidate.name
+                    exist_plate = existing.attributes.get("plate") or existing.name
+                    if cand_plate and exist_plate and _normalize(exist_plate) == _normalize(cand_plate):
+                        return existing.id
         return None
 
     def upsert_entities(self, candidates: List[Entity]) -> Dict[str, str]:
@@ -188,4 +196,55 @@ class GraphStore:
         return GraphResponse(nodes=nodes, links=links)
 
 
-store = GraphStore()
+from app.case_store import case_manager
+
+
+class DelegatingGraphStore:
+    """
+    Delegates all graph operations to the currently active case in case_manager.
+    Maintains 100% backward compatibility for all existing pipeline/API calls
+    while guaranteeing strict case isolation.
+    """
+
+    @property
+    def entities(self) -> Dict[str, Entity]:
+        return case_manager.get_active_case().entities
+
+    @entities.setter
+    def entities(self, val: Dict[str, Entity]) -> None:
+        case_manager.get_active_case().entities = val
+
+    @property
+    def relationships(self) -> Dict[str, Relationship]:
+        return case_manager.get_active_case().relationships
+
+    @relationships.setter
+    def relationships(self, val: Dict[str, Relationship]) -> None:
+        case_manager.get_active_case().relationships = val
+
+    def reset(self) -> None:
+        return case_manager.get_active_case().reset()
+
+    def find_duplicate(self, candidate: Entity) -> Optional[str]:
+        return case_manager.get_active_case().find_duplicate(candidate)
+
+    def upsert_entities(self, candidates: List[Entity]) -> Dict[str, str]:
+        return case_manager.get_active_case().upsert_entities(candidates)
+
+    def find_duplicate_relationship(self, candidate: Relationship) -> Optional[Relationship]:
+        return case_manager.get_active_case().find_duplicate_relationship(candidate)
+
+    def add_relationships(self, relationships: List[Relationship]) -> None:
+        return case_manager.get_active_case().add_relationships(relationships)
+
+    def build_graph(self) -> nx.MultiGraph:
+        return case_manager.get_active_case().build_graph()
+
+    def build_undirected_graph(self) -> nx.Graph:
+        return case_manager.get_active_case().build_undirected_graph()
+
+    def to_node_link(self, centrality: Dict[str, Dict[str, float]], community_map: Optional[Dict[str, str]] = None) -> GraphResponse:
+        return case_manager.get_active_case().to_node_link(centrality, community_map)
+
+
+store = DelegatingGraphStore()

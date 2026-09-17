@@ -82,12 +82,17 @@ export default function VehiclesView({
   // Filtered vehicles
   const filteredVehicles = useMemo(() => {
     return vehicles.filter(v => {
-      const matchesSearch = v.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                            (v.attributes?.model && v.attributes.model.toLowerCase().includes(searchQuery.toLowerCase())) ||
-                            v.drivers.some(d => d.name.toLowerCase().includes(searchQuery.toLowerCase()));
+      const q = searchQuery.toLowerCase();
+      const vName = (v.name || v.id || '').toLowerCase();
+      const plate = (v.attributes?.plate || '').toLowerCase();
+      const model = (v.attributes?.model || '').toLowerCase();
+      const matchesSearch = vName.includes(q) ||
+                            plate.includes(q) ||
+                            model.includes(q) ||
+                            (v.drivers || []).some(d => (d?.name || d?.id || '').toLowerCase().includes(q));
       
       if (filterMode === 'SHARED') return matchesSearch && v.isShared;
-      if (filterMode === 'HIGH_THREAT') return matchesSearch && (v.isShared || v.betweenness > 0.2);
+      if (filterMode === 'HIGH_THREAT') return matchesSearch && (v.isShared || (v.betweenness || 0) > 0.2);
       return matchesSearch;
     });
   }, [vehicles, searchQuery, filterMode]);

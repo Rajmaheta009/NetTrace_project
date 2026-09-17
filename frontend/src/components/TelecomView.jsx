@@ -46,28 +46,31 @@ export default function TelecomView({
       });
     });
 
-    // 2. Phone attributes on Person nodes
+    // 2. Phone attributes on Person nodes (support multiple phone numbers per person)
     nodes.filter(n => n.type === 'Person').forEach(person => {
-      const phoneAttr = person.attributes?.phone;
-      if (phoneAttr) {
-        if (!phoneMap.has(phoneAttr)) {
-          phoneMap.set(phoneAttr, {
-            id: person.id,
-            number: phoneAttr,
-            carrier: person.attributes?.carrier || (phoneAttr.startsWith('+') ? 'International Gateway' : 'Cellular Carrier'),
-            imei: person.attributes?.imei || 'Not Disclosed',
-            type: 'Attribute',
-            nodeRef: person,
-            linkedPersons: [],
-            calls: [],
-            isExplicitNode: false,
-            betweenness: person.centrality?.betweenness || 0,
-          });
-        }
-        const entry = phoneMap.get(phoneAttr);
-        if (!entry.linkedPersons.some(p => p.id === person.id)) {
-          entry.linkedPersons.push(person);
-        }
+      const rawPhoneAttr = person.attributes?.phone;
+      if (rawPhoneAttr) {
+        const phoneList = String(rawPhoneAttr).split(',').map(s => s.trim()).filter(Boolean);
+        phoneList.forEach(phoneAttr => {
+          if (!phoneMap.has(phoneAttr)) {
+            phoneMap.set(phoneAttr, {
+              id: `${person.id}_${phoneAttr}`,
+              number: phoneAttr,
+              carrier: person.attributes?.carrier || (phoneAttr.startsWith('+') ? 'International Gateway' : 'Cellular Carrier'),
+              imei: person.attributes?.imei || 'Not Disclosed',
+              type: 'Attribute',
+              nodeRef: person,
+              linkedPersons: [],
+              calls: [],
+              isExplicitNode: false,
+              betweenness: person.centrality?.betweenness || 0,
+            });
+          }
+          const entry = phoneMap.get(phoneAttr);
+          if (!entry.linkedPersons.some(p => p.id === person.id)) {
+            entry.linkedPersons.push(person);
+          }
+        });
       }
     });
 
@@ -164,15 +167,17 @@ export default function TelecomView({
     });
 
     links.filter(l => l.evidence?.some(e => e.toLowerCase().includes('wiretap') || e.toLowerCase().includes('call'))).forEach((link, idx) => {
-      const src = nodes.find(n => n.id === link.source);
-      const tgt = nodes.find(n => n.id === link.target);
+      const sId = typeof link.source === 'object' && link.source !== null ? link.source.id : link.source;
+      const tId = typeof link.target === 'object' && link.target !== null ? link.target.id : link.target;
+      const src = nodes.find(n => n.id === sId);
+      const tgt = nodes.find(n => n.id === tId);
       if (src && tgt && !list.some(c => c.eventId === link.event_id)) {
         const durationMatch = (link.evidence?.[0] || '').match(/\d+m\s*\d*s?/i);
         const durationStr = link.attributes?.duration || (durationMatch ? durationMatch[0] : 'Wiretap Intercept');
         const towerName = link.attributes?.tower 
           || link.attributes?.bts 
           || link.attributes?.location
-          || (nodes.find(n => n.type === 'Location' && (n.id === link.target || n.id === link.source))?.name)
+          || (nodes.find(n => n.type === 'Location' && (n.id === tId || n.id === sId))?.name)
           || null;
 
         list.push({
@@ -197,15 +202,30 @@ export default function TelecomView({
   const filteredPhones = useMemo(() => {
     return telecomDirectory.filter(p => {
       const q = searchQuery.toLowerCase();
-      const matchSearch = p.number.toLowerCase().includes(q) ||
-                          p.carrier.toLowerCase().includes(q) ||
-                          p.linkedPersons.some(lp => lp.name.toLowerCase().includes(q));
+      const num = (p.number || p.id || '').toLowerCase();
+      const carrier = (p.carrier || '').toLowerCase();
+      const matchSearch = num.includes(q) ||
+                          carrier.includes(q) ||
+                          (p.linkedPersons || []).some(lp => (lp?.name || lp?.id || '').toLowerCase().includes(q));
       
       if (filterMode === 'BURNER') return matchSearch && p.isBurner;
       if (filterMode === 'WIRETAP') return matchSearch && p.wiretapActive;
       return matchSearch;
     });
   }, [telecomDirectory, searchQuery, filterMode]);
+
+  const filteredCdrLogs = useMemo(() => {
+    if (!searchQuery.trim()) return cdrLogs;
+    const q = searchQuery.toLowerCase();
+    return cdrLogs.filter(c => 
+      (c.callerPhone && c.callerPhone.toLowerCase().includes(q)) ||
+      (c.receiverPhone && c.receiverPhone.toLowerCase().includes(q)) ||
+      (c.caller?.name && c.caller.name.toLowerCase().includes(q)) ||
+      (c.receiver?.name && c.receiver.name.toLowerCase().includes(q)) ||
+      (c.tower && c.tower.toLowerCase().includes(q)) ||
+      (c.duration && c.duration.toLowerCase().includes(q))
+    );
+  }, [cdrLogs, searchQuery]);
 
   const burnerCount = telecomDirectory.filter(p => p.isBurner).length;
 
@@ -417,7 +437,7 @@ export default function TelecomView({
               <PhoneCall className="w-4 h-4 text-cyan-400" />
               <span>Call Detail Records (CDR) & Intercept Matrix</span>
             </h3>
-            <span className="text-xs text-slate-500 font-mono">{cdrLogs.length} Events Logged</span>
+            <span className="text-xs text-slate-500 font-mono">{filteredCdrLogs.length} Events Logged</span>
           </div>
 
           <div className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
@@ -433,14 +453,14 @@ export default function TelecomView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60 font-medium">
-                  {cdrLogs.length === 0 ? (
+                  {filteredCdrLogs.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="py-8 text-center text-slate-500">
-                        No Call Detail Records logged in the current surveillance snapshot.
+                        No Call Detail Records matching the current criteria.
                       </td>
                     </tr>
                   ) : (
-                    cdrLogs.map((cdr) => (
+                    filteredCdrLogs.map((cdr) => (
                       <tr key={cdr.id} className="hover:bg-slate-800/40 transition">
                         <td className="py-3.5 px-4">
                           <button

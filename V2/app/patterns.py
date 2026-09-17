@@ -50,6 +50,7 @@ def detect_broker_pattern(graph: nx.MultiGraph, centrality: Dict[str, Dict[str, 
     for node_id, c in centrality.items():
         if c["betweenness"] > 0 and (c["betweenness"] >= cutoff or node_id in articulation_points):
             name = graph.nodes.get(node_id, {}).get("name", node_id)
+            deg = simple_graph.degree(node_id)
             flags.append(
                 PatternFlag(
                     pattern_type="broker",
@@ -60,14 +61,19 @@ def detect_broker_pattern(graph: nx.MultiGraph, centrality: Dict[str, Dict[str, 
                         + (" (articulation point)" if node_id in articulation_points else "")
                     ),
                     severity="high" if node_id in articulation_points else "medium",
+                    why=f"{name} connects otherwise separate network clusters.",
+                    graph_evidence={"degree": deg, "betweenness": c["betweenness"], "is_articulation_point": node_id in articulation_points},
+                    source_evidence=graph.nodes.get(node_id, {}).get("source_refs", []),
                 )
             )
     return flags
 
 
 def detect_shared_attribute_pattern(graph: nx.MultiGraph) -> List[PatternFlag]:
-    """A PhoneNumber / Vehicle / Location node connected to 2+ distinct Person entities."""
+    """A PhoneNumber / Vehicle / Location node or shared attribute connected to 2+ distinct Person entities."""
     flags: List[PatternFlag] = []
+    
+    # 1. Shared resource nodes (PhoneNumber, Vehicle, Location connected to 2+ persons)
     for node_id, data in graph.nodes(data=True):
         if data.get("type") not in ("PhoneNumber", "Vehicle", "Location"):
             continue
@@ -86,8 +92,98 @@ def detect_shared_attribute_pattern(graph: nx.MultiGraph) -> List[PatternFlag]:
                         f"distinct people: {', '.join(names)} - possible alias or shared resource"
                     ),
                     severity="high",
+                    why=f"{data.get('name', node_id)} is linked to multiple distinct people ({', '.join(names)}), indicating a shared resource or burner.",
+                    graph_evidence={"shared_resource": data.get("name", node_id), "distinct_persons_count": len(distinct_persons)},
+                    source_evidence=data.get("source_refs", []),
                 )
             )
+
+    # 2. Shared attributes directly on Person nodes (same phone, mobile, IMEI, plate)
+    phone_to_persons = {}
+    imei_to_persons = {}
+    plate_to_persons = {}
+
+    for node_id, data in graph.nodes(data=True):
+        if data.get("type") == "Person":
+            attrs = data.get("attributes") or {}
+            raw_phone = attrs.get("phone") or attrs.get("mobile")
+            if raw_phone:
+                for ph in str(raw_phone).split(","):
+                    p_clean = ph.strip()
+                    if p_clean:
+                        phone_to_persons.setdefault(p_clean, []).append(node_id)
+            imei = attrs.get("imei")
+            if imei and str(imei).strip():
+                imei_to_persons.setdefault(str(imei).strip(), []).append(node_id)
+            plate = attrs.get("plate") or attrs.get("vehicle")
+            if plate and str(plate).strip():
+                plate_to_persons.setdefault(str(plate).strip(), []).append(node_id)
+
+    # Flag shared phone numbers between persons
+    for phone_val, pids in phone_to_persons.items():
+        unique_pids = sorted(set(pids))
+        if len(unique_pids) >= 2:
+            names = [graph.nodes.get(p, {}).get("name", p) for p in unique_pids]
+            # Avoid duplicate flag if a PhoneNumber node for this phone already flagged it
+            already_flagged = any(phone_val in f.evidence for f in flags)
+            if not already_flagged:
+                flags.append(
+                    PatternFlag(
+                        pattern_type="shared_attribute",
+                        entities_involved=unique_pids,
+                        evidence=(
+                            f"Phone Number {phone_val} is shared across multiple distinct suspects: "
+                            f"{', '.join(names)} - shared tactical burner or alias identity"
+                        ),
+                        severity="high",
+                        why=f"Phone number {phone_val} appears associated with multiple persons ({', '.join(names)}), suggesting possible coordination or shared device.",
+                        graph_evidence={"attribute": "phone", "value": phone_val, "suspect_count": len(unique_pids)},
+                        source_evidence=[f"Attribute match: phone={phone_val}"],
+                    )
+                )
+
+    # Flag shared hardware IMEIs
+    for imei_val, pids in imei_to_persons.items():
+        unique_pids = sorted(set(pids))
+        if len(unique_pids) >= 2:
+            names = [graph.nodes.get(p, {}).get("name", p) for p in unique_pids]
+            flags.append(
+                PatternFlag(
+                    pattern_type="shared_attribute",
+                    entities_involved=unique_pids,
+                    evidence=(
+                        f"Device IMEI {imei_val} is shared by: {', '.join(names)} - "
+                        f"handset handover or SIM-swapping anomaly"
+                    ),
+                    severity="high",
+                    why=f"Device hardware identifier IMEI {imei_val} is linked to multiple individuals ({', '.join(names)}).",
+                    graph_evidence={"attribute": "imei", "value": imei_val, "suspect_count": len(unique_pids)},
+                    source_evidence=[f"Attribute match: imei={imei_val}"],
+                )
+            )
+
+    # Flag shared vehicle plates
+    for plate_val, pids in plate_to_persons.items():
+        unique_pids = sorted(set(pids))
+        if len(unique_pids) >= 2:
+            names = [graph.nodes.get(p, {}).get("name", p) for p in unique_pids]
+            already_flagged = any(plate_val in f.evidence for f in flags)
+            if not already_flagged:
+                flags.append(
+                    PatternFlag(
+                        pattern_type="shared_attribute",
+                        entities_involved=unique_pids,
+                        evidence=(
+                            f"Vehicle Plate {plate_val} is operated by multiple suspects: "
+                            f"{', '.join(names)} - shared tactical vehicle"
+                        ),
+                        severity="high",
+                        why=f"Vehicle registration plate {plate_val} is shared across {', '.join(names)}.",
+                        graph_evidence={"attribute": "plate", "value": plate_val, "suspect_count": len(unique_pids)},
+                        source_evidence=[f"Attribute match: plate={plate_val}"],
+                    )
+                )
+
     return flags
 
 
@@ -118,6 +214,9 @@ def detect_dense_subgroup_pattern(graph: nx.MultiGraph) -> List[PatternFlag]:
                         f"with edge density {round(density, 2)} - possible cell"
                     ),
                     severity="medium",
+                    why=f"This group of {n} entities exhibits high internal edge density ({round(density, 2)}), indicating frequent internal interactions.",
+                    graph_evidence={"size": n, "density": round(density, 3), "members": names},
+                    source_evidence=[f"Internal cluster subgraph with density {round(density, 2)}"],
                 )
             )
 
@@ -138,6 +237,9 @@ def detect_dense_subgroup_pattern(graph: nx.MultiGraph) -> List[PatternFlag]:
                                 f"with edge density 1.0 - possible operating cell"
                             ),
                             severity="high",
+                            why=f"All {len(clique)} entities in this clique are mutually connected with density 1.0.",
+                            graph_evidence={"size": len(clique), "density": 1.0, "members": names, "type": "maximal_clique"},
+                            source_evidence=[f"Complete maximal subgraph of {len(clique)} nodes"],
                         )
                     )
     except Exception:
@@ -191,6 +293,9 @@ def detect_repeated_cooccurrence_pattern(graph: nx.MultiGraph) -> List[PatternFl
                         f"repeated contact pattern worth review"
                     ),
                     severity="medium",
+                    why=f"{name_a} and {name_b} repeatedly co-occur across {len(events)} events or transactions.",
+                    graph_evidence={"cooccurrence_count": len(events), "event_ids": list(events)[:5]},
+                    source_evidence=[f"Shared event records: {', '.join(list(events)[:3])}"],
                 )
             )
     return flags

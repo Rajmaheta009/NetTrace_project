@@ -127,10 +127,43 @@ def parse_json(content: str) -> Tuple[List[dict], List[dict]]:
     return entities, relationships
 
 
-def split_text_into_chunks(text: str) -> List[str]:
-    """Splits pasted free text into report-sized chunks (blank-line separated, else whole text)."""
+def split_text_into_chunks(text: str, max_chunk_chars: int = 2500) -> List[str]:
+    """
+    Splits pasted free text into report-sized chunks.
+    Aggregates paragraphs or semi-structured records up to max_chunk_chars
+    so that small rows/blocks do not produce dozens of single-line API requests,
+    preventing rate-limiting (HTTP 429) and context fragmentation.
+    """
     text = text.strip()
     if not text:
         return []
-    chunks = [c.strip() for c in text.split("\n\n") if c.strip()]
+    raw_blocks = [c.strip() for c in text.split("\n\n") if c.strip()]
+    if not raw_blocks:
+        return [text]
+
+    chunks: List[str] = []
+    current_chunk: List[str] = []
+    current_length = 0
+
+    for block in raw_blocks:
+        block_len = len(block)
+        if block_len >= max_chunk_chars:
+            if current_chunk:
+                chunks.append("\n\n".join(current_chunk))
+                current_chunk = []
+                current_length = 0
+            chunks.append(block)
+        elif current_length + block_len + 2 > max_chunk_chars:
+            if current_chunk:
+                chunks.append("\n\n".join(current_chunk))
+            current_chunk = [block]
+            current_length = block_len
+        else:
+            current_chunk.append(block)
+            current_length += block_len + 2
+
+    if current_chunk:
+        chunks.append("\n\n".join(current_chunk))
+
     return chunks or [text]
+

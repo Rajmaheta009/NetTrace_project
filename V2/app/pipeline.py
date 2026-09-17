@@ -47,6 +47,27 @@ def run_import(request: ImportRequest) -> ImportResponse:
                 f"normalized and routed through AI-assisted text extraction."
             )
 
+    from app.case_store import case_manager
+    from app.models import EvidenceSourceType, ValidationStatus
+    active_case = case_manager.get_active_case()
+
+    if request.type == "csv":
+        source_type = EvidenceSourceType.CSV
+    elif request.type == "json":
+        source_type = EvidenceSourceType.JSON
+    elif detected_bucket == "semi_structured":
+        source_type = EvidenceSourceType.LOG
+    else:
+        source_type = EvidenceSourceType.TEXT
+    ev_filename = request.source_label or f"import_{request.type or 'text'}"
+    ev = active_case.register_evidence(
+        filename=ev_filename,
+        source_type=source_type,
+        content=request.content,
+        record_count=0,
+        description=f"Surveillance ingestion via {request.source_label or 'direct upload'}"
+    )
+
     if request.type == "csv":
         rows = parse_csv(request.content)
         entity_rows, relationship_rows = classify_csv_rows(rows)
@@ -54,6 +75,9 @@ def run_import(request: ImportRequest) -> ImportResponse:
         if entity_rows:
             entities, w = extract_from_structured_entities(entity_rows, request.source_label)
             warnings.extend(w)
+            for ent in entities:
+                ent.evidence_id = ev.evidence_id
+                ent.source_file = ev.filename
             id_map = store.upsert_entities(entities)
             imported_entities += len(entities)
             # id_map keys are the entity.id we generated (== the CSV row id, since we pass it through)
@@ -71,6 +95,9 @@ def run_import(request: ImportRequest) -> ImportResponse:
                 relationship_rows, raw_to_global, request.source_label
             )
             warnings.extend(w)
+            for rel in relationships:
+                rel.evidence_id = ev.evidence_id
+                rel.source_file = ev.filename
             store.add_relationships(relationships)
             imported_relationships += len(relationships)
             rejected.extend([w for w in warnings if w.startswith("Rejected structured relationship")])
@@ -80,6 +107,9 @@ def run_import(request: ImportRequest) -> ImportResponse:
 
         entities, w = extract_from_structured_entities(entity_rows, request.source_label)
         warnings.extend(w)
+        for ent in entities:
+            ent.evidence_id = ev.evidence_id
+            ent.source_file = ev.filename
         id_map = store.upsert_entities(entities)
         imported_entities += len(entities)
 
@@ -94,6 +124,9 @@ def run_import(request: ImportRequest) -> ImportResponse:
             relationship_rows, raw_to_global, request.source_label
         )
         warnings.extend(w)
+        for rel in relationships:
+            rel.evidence_id = ev.evidence_id
+            rel.source_file = ev.filename
         store.add_relationships(relationships)
         imported_relationships += len(relationships)
         rejected.extend([w for w in warnings if w.startswith("Rejected structured relationship")])
@@ -108,20 +141,38 @@ def run_import(request: ImportRequest) -> ImportResponse:
             warnings.extend(chunk_warnings)
             rejected.extend([w for w in chunk_warnings if w.startswith("Rejected relationship")])
 
+            for ent in chunk_entities:
+                ent.evidence_id = ev.evidence_id
+                ent.source_file = ev.filename
             id_map = store.upsert_entities(chunk_entities)
             imported_entities += len(chunk_entities)
 
             # remap relationship endpoints from this-chunk-local ids to final global ids
             remapped: List[Relationship] = []
             for rel in chunk_relationships:
+                rel.evidence_id = ev.evidence_id
+                rel.source_file = ev.filename
                 src = id_map.get(rel.source, rel.source)
                 tgt = id_map.get(rel.target, rel.target)
                 if src in store.entities and tgt in store.entities:
                     remapped.append(rel.model_copy(update={"source": src, "target": tgt}))
                 else:
-                    rejected.append(f"Rejected relationship after remap - unconfirmed entity: {rel}")
+                    rej_msg = f"Rejected relationship after remap - unconfirmed entity: {rel.relation_type} ({rel.source} -> {rel.target})"
+                    rejected.append(rej_msg)
+                    active_case.queue_validation(
+                        item_type="relationship",
+                        name_or_pair=f"{rel.source} -> {rel.target}",
+                        payload=rel.model_dump(),
+                        status=ValidationStatus.NEEDS_REVIEW,
+                        confidence=0.40,
+                        reason="Unconfirmed endpoint during text extraction",
+                        source_evidence=ev.filename,
+                    )
             store.add_relationships(remapped)
             imported_relationships += len(remapped)
+
+    # Update evidence record count
+    ev.record_count = imported_entities + imported_relationships
 
     graph = store.build_graph()
     return ImportResponse(
@@ -136,19 +187,58 @@ def run_import(request: ImportRequest) -> ImportResponse:
 
 
 def reset_and_load_sample() -> ImportResponse:
+    import os
+    from pathlib import Path
     from app.models import ImportRequest as _ImportRequest
-    from app.sample_data import SAMPLE_ENTITIES_CSV, SAMPLE_RELATIONSHIPS_CSV
 
     store.reset()
-    r1 = run_import(_ImportRequest(type="csv", content=SAMPLE_ENTITIES_CSV, source_label="sample"))
-    r2 = run_import(_ImportRequest(type="csv", content=SAMPLE_RELATIONSHIPS_CSV, source_label="sample"))
+
+    total_entities = 0
+    total_relationships = 0
+    total_rejected = []
+    total_warnings = []
+
+    # 1. Ingest baseline sample dataset
+    from app.sample_data import SAMPLE_ENTITIES_CSV, SAMPLE_RELATIONSHIPS_CSV
+    r1 = run_import(_ImportRequest(type="csv", content=SAMPLE_ENTITIES_CSV, source_label="sample_entities.csv"))
+    r2 = run_import(_ImportRequest(type="csv", content=SAMPLE_RELATIONSHIPS_CSV, source_label="sample_relationships.csv"))
+    total_entities += r1.imported_entities + r2.imported_entities
+    total_relationships += r1.imported_relationships + r2.imported_relationships
+    total_rejected.extend(r1.rejected_relationships + r2.rejected_relationships)
+    total_warnings.extend(r1.warnings + r2.warnings)
+
+    # 2. Ingest all multi-vector demo files from testing directory
+    testing_dir = Path(__file__).resolve().parent.parent / "testing"
+    demo_files = [
+        "01_structured_syndicate.csv",
+        "02_semistructured_network.json",
+        "03_unstructured_case_report.txt",
+        "04_multivector_intercepts.log",
+        "syndicate_case_data.json",
+    ]
+
+    if testing_dir.exists() and testing_dir.is_dir():
+        for fname in demo_files:
+            fpath = testing_dir / fname
+            if fpath.exists() and fpath.stat().st_size > 0:
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    resp = run_import(_ImportRequest(content=content, source_label=fname))
+                    total_entities += resp.imported_entities
+                    total_relationships += resp.imported_relationships
+                    total_rejected.extend(resp.rejected_relationships)
+                    total_warnings.extend(resp.warnings)
+                except Exception as exc:
+                    total_warnings.append(f"Failed to ingest {fname}: {exc}")
 
     graph = store.build_graph()
     return ImportResponse(
-        imported_entities=r1.imported_entities + r2.imported_entities,
-        imported_relationships=r1.imported_relationships + r2.imported_relationships,
-        rejected_relationships=r1.rejected_relationships + r2.rejected_relationships,
-        warnings=r1.warnings + r2.warnings,
+        imported_entities=total_entities,
+        imported_relationships=total_relationships,
+        rejected_relationships=total_rejected,
+        warnings=total_warnings,
         node_count=graph.number_of_nodes(),
         edge_count=graph.number_of_edges(),
+        detected_input_type="multi_vector_testing_suite",
     )

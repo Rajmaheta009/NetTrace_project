@@ -114,10 +114,10 @@ export default function FinancialView({
   const filteredOrgs = useMemo(() => {
     return organizations.filter(o => {
       const q = searchQuery.toLowerCase();
-      const match = o.name.toLowerCase().includes(q) ||
-                    o.category.toLowerCase().includes(q) ||
-                    o.jurisdiction.toLowerCase().includes(q) ||
-                    o.members.some(m => m.name.toLowerCase().includes(q));
+      const match = (o.name || '').toLowerCase().includes(q) ||
+                    (o.category || '').toLowerCase().includes(q) ||
+                    (o.jurisdiction || '').toLowerCase().includes(q) ||
+                    (o.members || []).some(m => (m?.name || '').toLowerCase().includes(q));
       return match;
     });
   }, [organizations, searchQuery]);
@@ -129,7 +129,8 @@ export default function FinancialView({
                     t.originator.toLowerCase().includes(q) ||
                     t.beneficiary.toLowerCase().includes(q) ||
                     t.conduit.toLowerCase().includes(q) ||
-                    t.channel.toLowerCase().includes(q);
+                    t.channel.toLowerCase().includes(q) ||
+                    (t.amount && t.amount.toLowerCase().includes(q));
       
       if (filterMode === 'HIGH_VALUE') return match && (t.amount.includes('Cr') || t.amount.includes('Lakh'));
       if (filterMode === 'SHELL_ONLY') return match && t.channel.toLowerCase().includes('member');

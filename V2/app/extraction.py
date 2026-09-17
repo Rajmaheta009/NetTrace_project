@@ -14,7 +14,11 @@ import re
 import uuid
 from typing import Dict, List, Tuple
 
-from app.ai_client import (AIUnavailableError,call_groq_json,)
+from app.ai_client import (
+    AIUnavailableError,
+    call_groq_json,
+    extract_clean_json_str,
+)
 from app.models import Entity, EntityType, Relationship, RelationType
 
 EXTRACTION_SYSTEM_PROMPT = """You are an information-extraction engine for an investigative tool.
@@ -111,6 +115,17 @@ def normalize_entity_type(raw_type: str) -> EntityType:
         "member": EntityType.PERSON,
         "driver": EntityType.PERSON,
         "target": EntityType.PERSON,
+        "asset": EntityType.PERSON,
+        "agent": EntityType.PERSON,
+        "operative": EntityType.PERSON,
+        "individual": EntityType.PERSON,
+        "courier": EntityType.PERSON,
+        "kingpin": EntityType.PERSON,
+        "smuggler": EntityType.PERSON,
+        "handler": EntityType.PERSON,
+        "informant": EntityType.PERSON,
+        "accomplice": EntityType.PERSON,
+        "witness": EntityType.PERSON,
         "organization": EntityType.ORGANIZATION,
         "org": EntityType.ORGANIZATION,
         "company": EntityType.ORGANIZATION,
@@ -121,6 +136,9 @@ def normalize_entity_type(raw_type: str) -> EntityType:
         "syndicate": EntityType.ORGANIZATION,
         "cartel": EntityType.ORGANIZATION,
         "front": EntityType.ORGANIZATION,
+        "agency": EntityType.ORGANIZATION,
+        "group": EntityType.ORGANIZATION,
+        "gang": EntityType.ORGANIZATION,
         "location": EntityType.LOCATION,
         "loc": EntityType.LOCATION,
         "place": EntityType.LOCATION,
@@ -160,7 +178,10 @@ def normalize_entity_type(raw_type: str) -> EntityType:
     }
     if s in mapping:
         return mapping[s]
-    return EntityType(raw_type)
+    try:
+        return EntityType(raw_type)
+    except Exception:
+        return EntityType.PERSON
 
 
 def normalize_relation_type(raw_type: str) -> RelationType:
@@ -169,18 +190,32 @@ def normalize_relation_type(raw_type: str) -> RelationType:
     s = str(raw_type).strip().upper().replace("-", "_").replace(" ", "_")
     mapping = {
         "KNOWS": RelationType.KNOWS,
+        "MET_WITH": RelationType.KNOWS,
+        "ACQUAINTANCE": RelationType.KNOWS,
+        "SPOUSE_OF": RelationType.KNOWS,
+        "RELATIVE_OF": RelationType.KNOWS,
+        "FRIEND_OF": RelationType.KNOWS,
         "CALL": RelationType.CALLED,
         "CALLED": RelationType.CALLED,
         "CALLS": RelationType.CALLED,
         "SPOKE_TO": RelationType.CALLED,
         "COMMUNICATED_WITH": RelationType.CALLED,
         "CONTACTED": RelationType.CALLED,
+        "CONTACT": RelationType.CALLED,
+        "DIALED": RelationType.CALLED,
+        "SMS": RelationType.CALLED,
+        "TEXTED": RelationType.CALLED,
+        "MESSAGED": RelationType.CALLED,
         "PINGED": RelationType.CALLED,
         "MET": RelationType.MET_AT,
         "MET_AT": RelationType.MET_AT,
         "MEET": RelationType.MET_AT,
+        "MEETING": RelationType.MET_AT,
+        "RENDEZVOUS": RelationType.MET_AT,
         "SEEN_AT": RelationType.MET_AT,
         "VISITED": RelationType.MET_AT,
+        "VISIT": RelationType.MET_AT,
+        "ARRIVED_AT": RelationType.MET_AT,
         "OWNS": RelationType.OWNS_VEHICLE,
         "OWNS_VEHICLE": RelationType.OWNS_VEHICLE,
         "DRIVES": RelationType.OWNS_VEHICLE,
@@ -191,14 +226,27 @@ def normalize_relation_type(raw_type: str) -> RelationType:
         "CONTROLS": RelationType.MEMBER_OF,
         "LEADS": RelationType.MEMBER_OF,
         "WORKS_FOR": RelationType.MEMBER_OF,
+        "DIRECTOR_OF": RelationType.MEMBER_OF,
+        "PARTNER_OF": RelationType.MEMBER_OF,
+        "EMPLOYED_BY": RelationType.MEMBER_OF,
+        "AFFILIATED_WITH": RelationType.MEMBER_OF,
         "LOCATED": RelationType.LOCATED_AT,
         "LOCATED_AT": RelationType.LOCATED_AT,
+        "OPERATES_AT": RelationType.LOCATED_AT,
+        "RESIDES_AT": RelationType.LOCATED_AT,
+        "HIDDEN_AT": RelationType.LOCATED_AT,
+        "BASED_AT": RelationType.LOCATED_AT,
         "PARTICIPATED": RelationType.PARTICIPATED_IN,
         "PARTICIPATED_IN": RelationType.PARTICIPATED_IN,
         "ATTENDED": RelationType.PARTICIPATED_IN,
         "INVOLVED_IN": RelationType.PARTICIPATED_IN,
         "ASSOCIATED": RelationType.ASSOCIATED_WITH,
         "ASSOCIATED_WITH": RelationType.ASSOCIATED_WITH,
+        "SUPPLIED": RelationType.ASSOCIATED_WITH,
+        "RECEIVED_FROM": RelationType.ASSOCIATED_WITH,
+        "BRIBED": RelationType.ASSOCIATED_WITH,
+        "LAUNDERED": RelationType.ASSOCIATED_WITH,
+        "CONSPIRATOR": RelationType.ASSOCIATED_WITH,
         # Financial, hawala, and transfer flows map to ASSOCIATED_WITH per PRD
         "TRANSFERRED": RelationType.ASSOCIATED_WITH,
         "PAID": RelationType.ASSOCIATED_WITH,
@@ -211,7 +259,10 @@ def normalize_relation_type(raw_type: str) -> RelationType:
     }
     if s in mapping:
         return mapping[s]
-    return RelationType(raw_type)
+    try:
+        return RelationType(raw_type)
+    except Exception:
+        return RelationType.ASSOCIATED_WITH
 
 
 def _heuristic_text_extraction(
@@ -415,8 +466,13 @@ def extract_from_text_chunk(
 
     parsed = None
     try:
-        raw_response = call_groq_json(EXTRACTION_SYSTEM_PROMPT, chunk_text)
-        parsed = json.loads(raw_response)
+        user_prompt = (
+            "Extract entities and relationships from the following intelligence data/report text:\n\n"
+            f"```text\n{chunk_text}\n```"
+        )
+        raw_response = call_groq_json(EXTRACTION_SYSTEM_PROMPT, user_prompt)
+        cleaned_json = extract_clean_json_str(raw_response)
+        parsed = json.loads(cleaned_json)
     except (AIUnavailableError, json.JSONDecodeError) as exc:
         warnings.append(f"AI extraction unavailable ({exc}); engaging deterministic heuristic extraction.")
 
