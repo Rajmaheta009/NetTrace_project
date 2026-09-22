@@ -40,7 +40,7 @@ export default function CrimeTypeSelector({
   };
 
   return (
-    <div className="relative inline-block text-left font-sans">
+    <div className={`relative inline-block text-left font-sans ${isOpen ? 'z-50' : 'z-20'}`}>
       {/* Trigger Button */}
       <button
         type="button"
@@ -68,7 +68,7 @@ export default function CrimeTypeSelector({
             className="fixed inset-0 z-40" 
             onClick={() => setIsOpen(false)} 
           />
-          <div className="absolute right-0 sm:left-0 mt-2 w-80 sm:w-96 max-h-[460px] bg-slate-950/98 backdrop-blur-2xl border border-rose-500/40 rounded-3xl p-3.5 shadow-2xl shadow-rose-950/50 z-50 flex flex-col space-y-2 animate-in fade-in zoom-in-95">
+          <div className="absolute left-0 mt-2 w-80 sm:w-96 max-h-[460px] bg-slate-950/98 backdrop-blur-2xl border border-rose-500/40 rounded-3xl p-3.5 shadow-2xl shadow-black/90 z-50 flex flex-col space-y-2 animate-in fade-in zoom-in-95">
             
             {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">

@@ -10,6 +10,7 @@ The frontend never receives the Groq API key.
 import json
 import logging
 import re
+import time
 import httpx
 
 from app.config import (
@@ -33,7 +34,8 @@ class AIUnavailableError(Exception):
 def extract_clean_json_str(raw: str) -> str:
     """
     Strips markdown code fences (```json ... ```) or trims non-JSON preambles
-    to extract the raw JSON object string.
+    to extract the raw JSON object string. Also normalizes non-standard Unicode
+    characters (e.g. non-breaking hyphens, curly quotes) to prevent console/codec crashes.
     """
     text = (raw or "").strip()
     if text.startswith("```"):
@@ -42,7 +44,25 @@ def extract_clean_json_str(raw: str) -> str:
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1 and end >= start:
-        return text[start : end + 1]
+        text = text[start : end + 1]
+
+    # Normalize exotic unicode punctuation to prevent Windows charmap encoding errors
+    replacements = {
+        "\u2011": "-",  # non-breaking hyphen
+        "\u2012": "-",  # figure dash
+        "\u2013": "-",  # en dash
+        "\u2014": "--", # em dash
+        "\u2018": "'",  # left single quote
+        "\u2019": "'",  # right single quote
+        "\u201c": '"',  # left double quote
+        "\u201d": '"',  # right double quote
+        "\u2026": "...",# ellipsis
+        "\u00a0": " ",  # non-breaking space
+    }
+    for char, repl in replacements.items():
+        if char in text:
+            text = text.replace(char, repl)
+
     return text
 
 
@@ -139,6 +159,10 @@ def call_groq_json(
 
             # If this candidate model failed with a recoverable status, try the next candidate
             if resp.status_code in (400, 404, 413, 429, 500, 502, 503):
+                if resp.status_code == 429:
+                    # Account rate limit hit: pause briefly to allow Groq token bucket to replenish
+                    logger.warning("Groq rate limit (429) hit. Pausing 1.5s for token bucket replenishment...")
+                    time.sleep(1.5)
                 last_status_exc = httpx.HTTPStatusError(
                     f"Groq candidate model {candidate_model} returned HTTP {resp.status_code}: {resp.text}",
                     request=resp.request,

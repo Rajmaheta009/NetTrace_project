@@ -16,6 +16,7 @@ import {
   Maximize2
 } from 'lucide-react';
 import { getEntityColor, RELATION_LABELS } from '../utils/colors';
+import { inferCrimeFallback, getSeverityStyle } from '../utils/crimeInference';
 
 export default function EntityDrawer({ 
   isOpen = true,
@@ -211,22 +212,45 @@ export default function EntityDrawer({
                     No confirmed connections.
                   </p>
                 ) : (
-                  connections.map((conn, idx) => (
-                    <div 
-                      key={idx}
-                      onClick={() => onSelectNeighbor(conn.entity_id)}
-                      className="p-2 rounded-lg bg-slate-900/70 hover:bg-slate-800 border border-slate-800 hover:border-cyan-500/50 cursor-pointer transition flex flex-col space-y-1 group"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-slate-200 group-hover:text-cyan-300 transition">
-                          {conn.entity_name}
-                        </span>
-                        <span className="text-[9px] px-1.5 py-0.2 rounded font-mono font-bold bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
-                          {conn.relation_type}
-                        </span>
+                  connections.map((conn, idx) => {
+                    const crime = inferCrimeFallback(conn);
+                    const style = crime ? getSeverityStyle(crime.crime_severity) : null;
+                    return (
+                      <div 
+                        key={idx}
+                        onClick={() => onSelectNeighbor(conn.entity_id)}
+                        className="p-2.5 rounded-lg bg-slate-900/70 hover:bg-slate-800 border border-slate-800 hover:border-cyan-500/50 cursor-pointer transition flex flex-col space-y-1.5 group"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-xs text-slate-200 group-hover:text-cyan-300 transition truncate pr-2">
+                            {conn.entity_name}
+                          </span>
+                          <span className="text-[9px] px-1.5 py-0.2 rounded font-mono font-bold bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 shrink-0">
+                            {conn.relation_type}
+                          </span>
+                        </div>
+
+                        {crime && crime.suspected_crime && (
+                          <div className="pt-1 border-t border-slate-800/60 flex flex-col space-y-0.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-semibold text-rose-300/90 flex items-center gap-1 truncate pr-1">
+                                <span className="text-[10px]">🚨</span>
+                                <span className="truncate">{crime.suspected_crime}</span>
+                              </span>
+                              <span className={`text-[8.5px] font-mono font-bold px-1.5 py-0.2 rounded border shrink-0 ${style.badge}`}>
+                                {crime.crime_severity}
+                              </span>
+                            </div>
+                            {crime.legal_statutes && crime.legal_statutes.length > 0 && (
+                              <div className="text-[8.5px] text-amber-400/80 font-mono truncate">
+                                ⚖️ {crime.legal_statutes[0]}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>

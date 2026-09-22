@@ -12,7 +12,7 @@ Module 2 & 3 - Entity & Relationship Extraction (PRD section 11 / section 15)
 import json
 import re
 import uuid
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from app.ai_client import (
     AIUnavailableError,
@@ -547,13 +547,19 @@ def extract_from_text_chunk(
             if k not in ("source", "target", "relation_type", "evidence", "attributes", "weight", "event_id") and v not in (None, ""):
                 rel_attrs[k] = v
 
+        raw_w = r.get("weight", 1)
+        try:
+            parsed_w = max(1, int(round(float(raw_w)))) if raw_w not in (None, "") else 1
+        except (ValueError, TypeError):
+            parsed_w = 1
+
         relationships.append(
             Relationship(
                 id=str(uuid.uuid4()),
                 source=src,
                 target=tgt,
                 relation_type=rtype,
-                weight=int(r.get("weight", 1)),
+                weight=parsed_w,
                 evidence=[evidence],
                 event_id=r.get("event_id"),
                 attributes=rel_attrs,
@@ -563,10 +569,15 @@ def extract_from_text_chunk(
     return final_entities, relationships, warnings
 
 
-def extract_from_structured_entities(rows: List[dict], source_ref: str) -> Tuple[List[Entity], List[str]]:
+def extract_from_structured_entities(
+    rows: List[dict], source_ref: Optional[str] = None
+) -> Tuple[List[Entity], List[str]]:
     """Maps structured entity rows (from CSV or JSON) directly to Entity objects - deterministic, no AI."""
     entities: List[Entity] = []
     warnings: List[str] = []
+    effective_source_ref = str(source_ref).strip() if source_ref else ""
+    s_refs = [effective_source_ref] if effective_source_ref else []
+
     for row in rows:
         try:
             etype = normalize_entity_type(row.get("type"))
@@ -601,14 +612,14 @@ def extract_from_structured_entities(rows: List[dict], source_ref: str) -> Tuple
                 name=name,
                 aliases=aliases,
                 attributes=attributes,
-                source_refs=[source_ref],
+                source_refs=list(s_refs),
             )
         )
     return entities, warnings
 
 
 def extract_from_structured_relationships(
-    rows: List[dict], id_map: Dict[str, str], source_ref: str
+    rows: List[dict], id_map: Dict[str, str], source_ref: Optional[str] = None
 ) -> Tuple[List[Relationship], List[str]]:
     """
     Maps structured relationship rows to Relationship objects. `id_map` maps the raw
@@ -616,6 +627,7 @@ def extract_from_structured_relationships(
     """
     relationships: List[Relationship] = []
     warnings: List[str] = []
+    ref_label = str(source_ref).strip() if source_ref else "structured_input"
     for row in rows:
         raw_src = str(row.get("source", "")).strip()
         raw_tgt = str(row.get("target", "")).strip()
@@ -642,7 +654,7 @@ def extract_from_structured_relationships(
             else:
                 evidence_list = [str(row["evidence"]).strip()]
         else:
-            evidence_text = f"{source_ref}: structured relationship" + (f" (event {event_id})" if event_id else "")
+            evidence_text = f"{ref_label}: structured relationship" + (f" (event {event_id})" if event_id else "")
             evidence_list = [evidence_text]
 
         # Extract attributes (amount, duration, tower, carrier, method, etc.)
@@ -653,13 +665,19 @@ def extract_from_structured_relationships(
             if k not in ("id", "source", "target", "relation_type", "weight", "evidence", "event_id", "attributes") and v not in (None, ""):
                 attrs[k] = v
 
+        raw_w = row.get("weight", 1)
+        try:
+            parsed_w = max(1, int(round(float(raw_w)))) if raw_w not in (None, "") else 1
+        except (ValueError, TypeError):
+            parsed_w = 1
+
         relationships.append(
             Relationship(
                 id=str(uuid.uuid4()),
                 source=src,
                 target=tgt,
                 relation_type=rtype,
-                weight=int(row.get("weight", 1)),
+                weight=parsed_w,
                 evidence=evidence_list,
                 event_id=event_id,
                 attributes=attrs,

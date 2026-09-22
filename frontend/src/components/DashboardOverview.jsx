@@ -82,8 +82,10 @@ export default function DashboardOverview({
     <div className="space-y-6 animate-in fade-in duration-300 font-sans">
       
       {/* Top Banner / Case Dossier Summary */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-rose-950/30 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xl relative overflow-hidden">
-        <div className="absolute right-0 top-0 w-96 h-96 bg-rose-500/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-rose-950/30 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xl relative z-30">
+        <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none">
+          <div className="absolute right-0 top-0 w-96 h-96 bg-rose-500/5 rounded-full blur-3xl" />
+        </div>
         
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 relative z-10">
           <div>

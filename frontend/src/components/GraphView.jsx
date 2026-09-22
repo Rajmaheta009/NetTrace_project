@@ -27,10 +27,12 @@ import {
   Award,
   Flame,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  FileText,
 } from 'lucide-react';
 import { getEntityColor, RELATION_LABELS } from '../utils/colors';
 import { logAuditAction } from '../services/api';
+import { inferCrimeFallback, getSeverityStyle } from '../utils/crimeInference';
 
 // Helper to draw clean rounded rectangles on 2D canvas with cross-browser support
 function drawRoundedPill(ctx, x, y, width, height, radius) {
@@ -1155,14 +1157,14 @@ export default function GraphView({
 
           
 
-          {/* Quick Kingpin Focus Button */}
+          {/* Quick Centrality Focus Button */}
           <button
             onClick={handleLocateKingpin}
             className="flex items-center space-x-1 px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-bold transition shadow-sm"
-            title="Automatically home in on the highest betweenness broker"
+            title="Automatically home in on the highest betweenness broker entity"
           >
             <Crown className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">Focus Kingpin</span>
+            <span className="hidden md:inline">Focus Central Entity</span>
           </button>
 
           {/* Previous Criminal Quick Navigation */}
@@ -1469,10 +1471,10 @@ export default function GraphView({
               <button
                 onClick={handleLocateKingpin}
                 className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition shadow-sm cursor-pointer"
-                title="Automatically center 3D camera on #1 Kingpin"
+                title="Automatically center 3D camera on #1 Highest Centrality Entity"
               >
                 <Crown className="w-3.5 h-3.5 text-amber-400" />
-                <span>Focus #1 Kingpin</span>
+                <span>Focus #1 Centrality</span>
               </button>
 
               <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-bold">
@@ -1569,15 +1571,15 @@ export default function GraphView({
                                 {isTopKingpin ? (
                                   <span className="flex items-center space-x-1 px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-[10px] font-mono font-black text-amber-300">
                                     <Crown className="w-3 h-3 text-amber-400" />
-                                    <span>#1 KINGPIN</span>
+                                    <span>#1 CENTRALITY</span>
                                   </span>
                                 ) : index === 1 ? (
                                   <span className="px-2 py-0.5 rounded-md bg-sky-500/20 border border-sky-500/40 text-[10px] font-mono font-black text-sky-300">
-                                    #2 LIEUTENANT
+                                    #2 CENTRALITY
                                   </span>
                                 ) : index === 2 ? (
                                   <span className="px-2 py-0.5 rounded-md bg-amber-700/20 border border-amber-600/40 text-[10px] font-mono font-black text-amber-200">
-                                    #3 CELL LEAD
+                                    #3 CENTRALITY
                                   </span>
                                 ) : (
                                   <span className="px-1.5 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-[10px] font-mono font-bold text-slate-400">
@@ -1853,7 +1855,7 @@ export default function GraphView({
                         className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition shadow-sm cursor-pointer"
                       >
                         <Crown className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Inspect #1 Kingpin ({mainCriminals[0]?.name})</span>
+                        <span>Inspect #1 Centrality Entity ({mainCriminals[0]?.name})</span>
                       </button>
                     )}
                   </div>
@@ -1937,7 +1939,7 @@ export default function GraphView({
       {/* RELATIONSHIP EVIDENCE & TRACEABILITY INSPECTOR MODAL */}
       {inspectedRelationship && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg p-6 shadow-2xl space-y-4 font-sans animate-in zoom-in-95">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg p-6 shadow-2xl space-y-4 font-sans animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
                 <span className="text-[10px] font-mono uppercase font-bold text-cyan-400">
@@ -1972,6 +1974,85 @@ export default function GraphView({
               </p>
             </div>
 
+            {/* 🚨 Suspected Criminal Offense / Activity Inference */}
+            {(() => {
+              const crime = inferCrimeFallback(inspectedRelationship);
+              if (!crime) return null;
+              const severityStyle = getSeverityStyle(crime.crime_severity);
+              return (
+                <div className={`p-4 rounded-2xl border ${severityStyle.card} space-y-3`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-base">🚨</span>
+                      <span className="text-[10.5px] font-mono font-bold uppercase tracking-wider text-rose-400">
+                        Suspected Criminal Offense / Nexus
+                      </span>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${severityStyle.badge}`}>
+                        {crime.crime_severity} Severity
+                      </span>
+                      {crime.indictment_readiness && (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-900/90 text-slate-300 border border-slate-700">
+                          {crime.indictment_readiness}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-100 flex items-center gap-1.5">
+                      {crime.suspected_crime}
+                    </h4>
+                    <span className="text-[11px] font-mono text-slate-400 block mt-0.5">
+                      Category: <span className={severityStyle.accent}>{crime.crime_category}</span>
+                    </span>
+                  </div>
+
+                  {crime.legal_statutes && crime.legal_statutes.length > 0 && (
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-mono uppercase text-slate-400 font-bold block">
+                        Applicable Legal Statutes & Acts:
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {crime.legal_statutes.map((statute, sIdx) => (
+                          <span
+                            key={sIdx}
+                            className="text-[10px] font-mono bg-slate-900/90 text-amber-300 px-2 py-0.5 rounded-md border border-amber-500/30"
+                          >
+                            ⚖️ {statute}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {crime.crime_rationale && (
+                    <div className="text-[11px] text-slate-300 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80 leading-relaxed font-sans">
+                      <span className="font-semibold text-slate-200">Forensic Nexus: </span>
+                      {crime.crime_rationale}
+                    </div>
+                  )}
+
+                  {crime.actionable_recommendations && crime.actionable_recommendations.length > 0 && (
+                    <div className="space-y-1 pt-1">
+                      <span className="text-[10px] font-mono uppercase text-slate-400 font-bold block">
+                        Recommended Investigative Directives:
+                      </span>
+                      <div className="space-y-1 text-[11px] text-slate-300">
+                        {crime.actionable_recommendations.map((rec, rIdx) => (
+                          <div key={rIdx} className="flex items-start gap-1.5">
+                            <span className="text-emerald-400 font-bold text-xs mt-0.5">→</span>
+                            <span className="leading-snug">{rec}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* Confidence Score Bar & Breakdown */}
             <div className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 space-y-2">
               <div className="flex items-center justify-between text-xs font-mono">
@@ -1994,6 +2075,33 @@ export default function GraphView({
                   ))}
                 </div>
               )}
+            </div>
+
+            {/* Forensic Evidence Lineage & Chain of Custody */}
+            <div className="p-3.5 bg-slate-950/90 rounded-2xl border border-cyan-500/30 space-y-2">
+              <div className="flex items-center justify-between text-[11px] font-mono">
+                <span className="font-bold text-cyan-400 uppercase flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-cyan-400" /> Evidence Lineage & Provenance
+                </span>
+                {inspectedRelationship.evidentiary_sufficiency && (
+                  <span className="px-2 py-0.5 rounded bg-cyan-950 text-cyan-300 text-[10px] border border-cyan-800">
+                    Sufficiency: {inspectedRelationship.evidentiary_sufficiency}
+                  </span>
+                )}
+              </div>
+              <div className="text-[11px] text-slate-300 space-y-1 font-sans leading-relaxed">
+                <div>
+                  <span className="text-slate-500 font-mono text-[10px] uppercase block">Lineage Path:</span>
+                  <span className="text-cyan-200 font-mono text-xs">
+                    {nodes.find(n => n.id === (typeof inspectedRelationship.source === 'object' ? inspectedRelationship.source.id : inspectedRelationship.source))?.name || inspectedRelationship.source}
+                    {' '}&rarr; [{inspectedRelationship.relation_type}]{' '}&rarr;{' '}
+                    {nodes.find(n => n.id === (typeof inspectedRelationship.target === 'object' ? inspectedRelationship.target.id : inspectedRelationship.target))?.name || inspectedRelationship.target}
+                  </span>
+                </div>
+                <div className="text-slate-400 text-xs">
+                  Derived from source evidence <span className="text-slate-200 font-mono">{inspectedRelationship.source_file || inspectedRelationship.evidence_id || 'Primary Ingestion'}</span> with confirmed endpoint entities and non-repudiation logging.
+                </div>
+              </div>
             </div>
 
             {/* Evidence Quotes / Citations */}

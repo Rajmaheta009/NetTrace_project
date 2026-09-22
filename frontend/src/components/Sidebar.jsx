@@ -20,7 +20,8 @@ import {
   FolderLock,
   ChevronLeft,
   ChevronRight,
-  User
+  User,
+  ShieldAlert
 } from 'lucide-react';
 
 export default function Sidebar({
@@ -30,6 +31,7 @@ export default function Sidebar({
   currentUser,
   onOpenHistoryModal,
   onOpenCaseModal,
+  onOpenRoleModal,
   validationCount = 0,
   evidenceCount = 0,
   patternCount = 0,
@@ -37,6 +39,9 @@ export default function Sidebar({
   collapsed,
   setCollapsed,
 }) {
+  const isAdmin = currentUser?.roles?.some(r => ['ADMIN', 'SUPER_ADMIN'].includes(String(r).toUpperCase().replace(' ', '_'))) ||
+                  ['ADMIN', 'SUPER_ADMIN'].includes(String(currentUser?.role?.value || currentUser?.role || '').toUpperCase().replace(' ', '_'));
+
   const navSections = [
     {
       title: 'Command & Core',
@@ -74,15 +79,20 @@ export default function Sidebar({
         { id: 'audit', label: 'Investigation History', icon: History },
         { id: 'ingest', label: 'Data Ingestion', icon: UploadCloud },
         { id: 'cases', label: 'Case Files Manager', icon: FolderLock },
+        ...(isAdmin ? [{ id: 'admin', label: 'Administration & RBAC', icon: ShieldAlert, special: true }] : []),
       ],
     },
   ];
 
   const getRoleBadgeColor = (role) => {
-    switch (role) {
-      case 'Admin': return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
-      case 'Investigator': return 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40';
-      case 'Viewer': return 'bg-slate-700/40 text-slate-300 border-slate-600';
+    const r = String(role || '').toUpperCase().replace(' ', '_');
+    switch (r) {
+      case 'SUPER_ADMIN': return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+      case 'ADMIN': return 'bg-sky-500/20 text-sky-300 border-sky-500/40';
+      case 'INVESTIGATOR': return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+      case 'ANALYST': return 'bg-purple-500/20 text-purple-300 border-purple-500/40';
+      case 'REVIEWER': return 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40';
+      case 'VIEWER': return 'bg-slate-700/40 text-slate-300 border-slate-600';
       default: return 'bg-slate-700 text-slate-300 border-slate-600';
     }
   };
@@ -195,21 +205,25 @@ export default function Sidebar({
       <div className="p-3 border-t border-slate-800/70 bg-slate-950/50">
         {!collapsed ? (
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2 truncate">
-              <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 text-cyan-400">
+            <div 
+              className="flex items-center space-x-2 truncate cursor-pointer group"
+              onClick={onOpenRoleModal}
+              title="Click to Switch Role or Log In"
+            >
+              <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0 text-cyan-400 group-hover:border-cyan-500 transition">
                 <User className="w-4 h-4" />
               </div>
               <div className="truncate">
-                <div className="text-[11px] font-semibold text-slate-200 truncate">
-                  {currentUser?.name || 'Officer Vikram'}
+                <div className="text-[11px] font-semibold text-slate-200 group-hover:text-cyan-300 transition truncate">
+                  {currentUser?.name || currentUser?.username || 'Officer Vikram'}
                 </div>
                 <div className="flex items-center space-x-2 mt-0.5">
-                  <span className="text-[9px] font-mono text-cyan-300 font-bold bg-cyan-950/60 px-1.5 py-0.2 rounded border border-cyan-800/40">
-                    Active Officer
+                  <span className="text-[9px] font-mono text-cyan-300 font-bold bg-cyan-950/60 px-1.5 py-0.2 rounded border border-cyan-800/40 group-hover:border-cyan-500/60 transition">
+                    {currentUser?.role?.value || currentUser?.role || 'Active Role'}
                   </span>
                   {onOpenHistoryModal && (
                     <button
-                      onClick={onOpenHistoryModal}
+                      onClick={(e) => { e.stopPropagation(); onOpenHistoryModal(); }}
                       className="text-[9px] font-mono text-amber-400 hover:text-amber-300 flex items-center space-x-0.5 cursor-pointer underline decoration-amber-500/40"
                       title="Check Previous Investigation Records"
                     >

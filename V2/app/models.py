@@ -6,9 +6,9 @@ section 16 (Graph Model & Algorithms) exactly.
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class EntityType(str, Enum):
@@ -31,6 +31,13 @@ class RelationType(str, Enum):
     ASSOCIATED_WITH = "ASSOCIATED_WITH"
 
 
+SYMMETRIC_RELATION_TYPES = {"KNOWS", "ASSOCIATED_WITH", "MET_AT", "COMMUNICATED_WITH"}
+DIRECTED_RELATION_TYPES = {
+    "CALLED", "TRANSFERRED_TO", "TRAVELLED_TO", "OWNS_VEHICLE",
+    "SENT_TO", "MEMBER_OF", "LOCATED_AT", "BRIBED", "TRANSPORTED_CONTRABAND"
+}
+
+
 # ---- Core Entities & Relationships ---------------------------------------------
 
 class Entity(BaseModel):
@@ -45,6 +52,8 @@ class Entity(BaseModel):
     source_file: Optional[str] = None
     source_record: Optional[str] = None
     validation_status: Optional[str] = "Valid"
+    is_merged: bool = False
+    merged_into_id: Optional[str] = None
 
 
 class Relationship(BaseModel):
@@ -64,6 +73,14 @@ class Relationship(BaseModel):
     source_record: Optional[str] = None
     validation_status: str = "Valid"
     occurrences: int = 1
+    suspected_crime: Optional[str] = None
+    crime_category: Optional[str] = None
+    legal_statutes: List[str] = Field(default_factory=list)
+    crime_severity: Optional[str] = "Moderate"
+    crime_rationale: Optional[str] = None
+    actionable_recommendations: List[str] = Field(default_factory=list)
+    indictment_readiness: Optional[str] = "Preliminary"
+    evidentiary_sufficiency: Optional[str] = "Preliminary"
 
 
 # ---- Case Management Models ----------------------------------------------------
@@ -71,6 +88,7 @@ class Relationship(BaseModel):
 class CaseStatus(str, Enum):
     OPEN = "Open"
     UNDER_REVIEW = "Under Review"
+    UNDER_INVESTIGATION = "Under Investigation"
     CLOSED = "Closed"
     ARCHIVED = "Archived"
 
@@ -80,7 +98,9 @@ class Case(BaseModel):
     case_name: str
     description: str = ""
     investigation_type: str = "organized_crime"
-    status: CaseStatus = CaseStatus.OPEN
+    status: Union[CaseStatus, str] = CaseStatus.OPEN
+    priority: str = "High"
+    is_protected: bool = False
     created_at: str
     updated_at: str
     created_by: str = "Officer Vikram"
@@ -93,6 +113,7 @@ class CaseCreateRequest(BaseModel):
     case_name: str
     description: str = ""
     investigation_type: Optional[str] = "organized_crime"
+    priority: Optional[str] = "High"
     created_by: Optional[str] = "Officer Vikram"
 
 
@@ -100,7 +121,8 @@ class CaseUpdateRequest(BaseModel):
     case_name: Optional[str] = None
     description: Optional[str] = None
     investigation_type: Optional[str] = None
-    status: Optional[CaseStatus] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
 
 
 # ---- Evidence Management Models ------------------------------------------------
@@ -126,15 +148,47 @@ class Evidence(BaseModel):
     evidence_id: str
     case_id: str
     filename: str
-    source_type: EvidenceSourceType = EvidenceSourceType.OTHER
+    original_filename: Optional[str] = None
+    source_type: Union[EvidenceSourceType, str] = EvidenceSourceType.OTHER
+    mime_type: str = "text/plain"
+    file_size: int = 0
     uploaded_at: str
     uploaded_by: str = "Officer Vikram"
-    file_type: str = "text/plain"
+    source_system: str = "NetTrace Ingestion Engine"
+    acquisition_timestamp: Optional[str] = None
+    processing_timestamp: Optional[str] = None
+    parser_version: str = "v2.2-deterministic"
+    ai_model_version: Optional[str] = None
     record_count: int = 0
     processing_status: EvidenceStatus = EvidenceStatus.COMPLETED
     sha256_hash: str = ""
     description: str = ""
     original_source_ref: str = ""
+
+    @field_validator("source_type", mode="before")
+    @classmethod
+    def normalize_source_type(cls, v):
+        if isinstance(v, str):
+            v_low = v.strip().lower()
+            if v_low == "csv":
+                return EvidenceSourceType.CSV
+            elif v_low == "json":
+                return EvidenceSourceType.JSON
+            elif v_low in ("text", "txt"):
+                return EvidenceSourceType.TEXT
+            elif v_low in ("report", "pdf"):
+                return EvidenceSourceType.REPORT
+            elif v_low in ("log", "cdr"):
+                return EvidenceSourceType.LOG
+            elif v_low in ("manual", "manual entry"):
+                return EvidenceSourceType.MANUAL_ENTRY
+            elif v_low == "other":
+                return EvidenceSourceType.OTHER
+            else:
+                for member in EvidenceSourceType:
+                    if member.value.lower() == v_low:
+                        return member
+        return v
 
 
 # ---- Data Quality / Validation Center Models -----------------------------------
@@ -159,7 +213,7 @@ class ValidationRecord(BaseModel):
 
 
 class ValidationReviewAction(BaseModel):
-    action: Literal["accept", "reject", "correct"]
+    action: str  # accept, reject, correct (case-insensitive)
     corrected_payload: Optional[Dict[str, Any]] = None
     reviewer_notes: Optional[str] = ""
 
@@ -189,8 +243,11 @@ class NoteCreateRequest(BaseModel):
 # ---- User & RBAC Models -------------------------------------------------------
 
 class UserRole(str, Enum):
+    SUPER_ADMIN = "Super Admin"
     ADMIN = "Admin"
     INVESTIGATOR = "Investigator"
+    ANALYST = "Analyst"
+    REVIEWER = "Reviewer"
     VIEWER = "Viewer"
 
 
@@ -198,15 +255,134 @@ class UserProfile(BaseModel):
     user_id: str
     name: str
     role: UserRole
+    email: Optional[str] = None
+    department: Optional[str] = "Forensic Intelligence"
+    designation: Optional[str] = "Investigator"
+    status: Optional[str] = "ACTIVE"
+    roles: List[str] = Field(default_factory=list)
+    permissions: List[str] = Field(default_factory=list)
 
 
 class UserRoleSwitchRequest(BaseModel):
     role: UserRole
 
 
+class LoginRequest(BaseModel):
+    username_or_email: str
+    password: str
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    email: str
+    password: str
+    full_name: str
+    department: Optional[str] = "Forensic Intelligence"
+    designation: Optional[str] = "Investigator"
+    role: Optional[str] = "Viewer"
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: Dict[str, Any]
+
+
+class UserCreateRequest(BaseModel):
+    username: str
+    email: str
+    password: str
+    full_name: str
+    department: Optional[str] = "Forensic Intelligence"
+    designation: Optional[str] = "Investigator"
+    roles: List[str] = Field(default_factory=lambda: ["Investigator"])
+
+
+class UserUpdateRequest(BaseModel):
+    full_name: Optional[str] = None
+    department: Optional[str] = None
+    designation: Optional[str] = None
+    email: Optional[str] = None
+
+
+class UserStatusUpdateRequest(BaseModel):
+    status: str  # ACTIVE, INACTIVE, SUSPENDED
+
+
+class UserRoleAssignRequest(BaseModel):
+    roles: List[str]
+
+
+class UserOut(BaseModel):
+    id: str
+    username: str
+    email: str
+    full_name: str
+    department: str
+    designation: str
+    status: str
+    roles: List[str] = Field(default_factory=list)
+    permissions: List[str] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+    last_login: Optional[str] = None
+
+
+class RoleOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    is_system_role: bool
+    permissions: List[str] = Field(default_factory=list)
+
+
+class PermissionOut(BaseModel):
+    id: int
+    code: str
+    description: str
+    category: str
+
+
+class CaseUserAssignRequest(BaseModel):
+    user_id: str
+    case_role: str = "INVESTIGATOR"  # CASE_OWNER, INVESTIGATOR, ANALYST, REVIEWER, OBSERVER
+
+
+class CaseUserOut(BaseModel):
+    id: int
+    case_id: str
+    user_id: str
+    username: Optional[str] = None
+    full_name: Optional[str] = None
+    case_role: str
+    assigned_by: str
+    assigned_at: str
+
+
+class HealthResponse(BaseModel):
+    status: str
+    version: str = "2.2.0"
+    active_case_id: Optional[str] = None
+    environment: str = "production"
+
+
+class DbHealthResponse(BaseModel):
+    status: str
+    database: str
+    dialect: str
+    pool: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+
 class EvidenceCreateRequest(BaseModel):
     filename: str
-    source_type: EvidenceSourceType = EvidenceSourceType.OTHER
+    source_type: Union[EvidenceSourceType, str] = EvidenceSourceType.OTHER
     content: str
     description: Optional[str] = ""
     uploaded_by: Optional[str] = "Officer Vikram"
@@ -260,6 +436,38 @@ class GraphLinkOut(BaseModel):
     source_record: Optional[str] = None
     validation_status: str = "Valid"
     occurrences: int = 1
+    suspected_crime: Optional[str] = None
+    crime_category: Optional[str] = None
+    legal_statutes: List[str] = Field(default_factory=list)
+    crime_severity: Optional[str] = "Moderate"
+    crime_rationale: Optional[str] = None
+    actionable_recommendations: List[str] = Field(default_factory=list)
+    indictment_readiness: Optional[str] = "Preliminary"
+    evidentiary_sufficiency: Optional[str] = "Preliminary"
+
+
+class RelationshipCrimeInferenceRequest(BaseModel):
+    relation_type: str
+    source: Optional[str] = None
+    target: Optional[str] = None
+    source_name: Optional[str] = None
+    target_name: Optional[str] = None
+    source_type: Optional[str] = None
+    target_type: Optional[str] = None
+    evidence: List[str] = Field(default_factory=list)
+    attributes: Dict[str, Any] = Field(default_factory=dict)
+    case_profile: Optional[str] = "organized_crime"
+
+
+class RelationshipCrimeInferenceResponse(BaseModel):
+    suspected_crime: str
+    crime_category: str
+    legal_statutes: List[str]
+    crime_severity: str
+    crime_rationale: str
+    actionable_recommendations: List[str]
+    indictment_readiness: str
+    evidentiary_sufficiency: Optional[str] = "Preliminary"
 
 
 class GraphResponse(BaseModel):
@@ -276,7 +484,25 @@ class CentralityEntry(BaseModel):
     betweenness: float
 
 
+class PatternReviewStatus(str, Enum):
+    NEW = "NEW"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    CONFIRMED = "CONFIRMED"
+    DISMISSED = "DISMISSED"
+    CORRECTED = "CORRECTED"
+
+
+class PatternReviewAction(BaseModel):
+    action: Optional[str] = None
+    review_status: Optional[PatternReviewStatus] = None
+    notes: Optional[str] = ""
+    review_reason: Optional[str] = ""
+
+
 class PatternFlag(BaseModel):
+    id: Optional[str] = None
+    finding_id: Optional[str] = None
+    case_id: Optional[str] = None
     pattern_type: str
     entities_involved: List[str]
     evidence: str
@@ -284,6 +510,11 @@ class PatternFlag(BaseModel):
     why: Optional[str] = None
     graph_evidence: Optional[Dict[str, Any]] = None
     source_evidence: Optional[List[str]] = None
+    review_status: PatternReviewStatus = PatternReviewStatus.NEW
+    review_reason: Optional[str] = None
+    review_notes: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[str] = None
 
 
 class ConnectionOut(BaseModel):
@@ -291,6 +522,11 @@ class ConnectionOut(BaseModel):
     entity_name: str
     relation_type: RelationType
     evidence: List[str]
+    suspected_crime: Optional[str] = None
+    crime_category: Optional[str] = None
+    legal_statutes: List[str] = Field(default_factory=list)
+    crime_severity: Optional[str] = None
+    crime_rationale: Optional[str] = None
 
 
 class EntityDetailResponse(BaseModel):
@@ -331,6 +567,11 @@ class ConnectionPathStep(BaseModel):
     confidence_label: str
     evidence_id: Optional[str] = None
     source_file: Optional[str] = None
+    suspected_crime: Optional[str] = None
+    crime_category: Optional[str] = None
+    legal_statutes: List[str] = Field(default_factory=list)
+    crime_severity: Optional[str] = None
+    crime_rationale: Optional[str] = None
 
 
 class ConnectionPathResponse(BaseModel):
@@ -403,3 +644,45 @@ class EntityMergeRequest(BaseModel):
     source_entity_id: str
     target_entity_id: str
     reason: Optional[str] = "Investigator verified duplicate identity"
+
+
+class EntityMergeRecordOut(BaseModel):
+    merge_id: str
+    case_id: str
+    source_entity_id: str
+    source_entity_name: str
+    target_entity_id: str
+    target_entity_name: str
+    performed_by: str
+    timestamp: str
+    reason: str
+
+
+class AuditIntegrityResponse(BaseModel):
+    valid: bool
+    total_records: int
+    verified_records: int
+    broken_at: Optional[str] = None
+    message: str
+
+
+class RelationshipLineageResponse(BaseModel):
+    relationship_id: str
+    source_id: str
+    source_name: str
+    target_id: str
+    target_name: str
+    relation_type: str
+    evidence_id: Optional[str] = None
+    source_file: Optional[str] = None
+    source_record: Optional[str] = None
+    evidence_citations: List[str] = Field(default_factory=list)
+    confidence: float = 0.5
+    confidence_label: str = "Moderate"
+    validation_status: str = "Valid"
+    parser_version: str = "v2.2-deterministic"
+    timestamp: Optional[str] = None
+    lineage_summary: Optional[str] = None
+    supporting_evidence: List[Evidence] = Field(default_factory=list)
+    raw_records: List[str] = Field(default_factory=list)
+

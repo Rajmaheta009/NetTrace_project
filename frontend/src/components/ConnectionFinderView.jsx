@@ -9,6 +9,7 @@ import {
   Network
 } from 'lucide-react';
 import { fetchConnections } from '../services/api';
+import { inferCrimeFallback, getSeverityStyle } from '../utils/crimeInference';
 
 export default function ConnectionFinderView({ activeCase, graphData, onHighlightPathInGraph }) {
   const [sourceId, setSourceId] = useState('');
@@ -132,41 +133,82 @@ export default function ConnectionFinderView({ activeCase, graphData, onHighligh
 
               {/* Step by Step Breakdown */}
               <div className="space-y-3">
-                {pathResult.path_edges.map((step, sIdx) => (
-                  <div
-                    key={sIdx}
-                    className="p-4 bg-slate-950/70 border border-slate-800 rounded-xl space-y-2 hover:border-slate-700 transition-colors"
-                  >
-                    <div className="flex items-center justify-between text-xs">
-                      <div className="flex items-center space-x-2 font-bold">
-                        <span className="text-cyan-400">Hop {sIdx + 1}:</span>
-                        <span className="text-slate-200">{step.source_name}</span>
-                        <ArrowRight className="w-3.5 h-3.5 text-slate-500" />
-                        <span className="text-amber-300 font-mono">[{step.relation_type}]</span>
-                        <ArrowRight className="w-3.5 h-3.5 text-slate-500" />
-                        <span className="text-slate-200">{step.target_name}</span>
+                {pathResult.path_edges.map((step, sIdx) => {
+                  const crime = inferCrimeFallback(step);
+                  const style = crime ? getSeverityStyle(crime.crime_severity) : null;
+                  return (
+                    <div
+                      key={sIdx}
+                      className="p-4 bg-slate-950/70 border border-slate-800 rounded-xl space-y-2.5 hover:border-slate-700 transition-colors"
+                    >
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center space-x-2 font-bold">
+                          <span className="text-cyan-400">Hop {sIdx + 1}:</span>
+                          <span className="text-slate-200">{step.source_name}</span>
+                          <ArrowRight className="w-3.5 h-3.5 text-slate-500" />
+                          <span className="text-amber-300 font-mono">[{step.relation_type}]</span>
+                          <ArrowRight className="w-3.5 h-3.5 text-slate-500" />
+                          <span className="text-slate-200">{step.target_name}</span>
+                        </div>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-900 border border-slate-700 text-cyan-300 font-semibold">
+                          {(step.confidence * 100).toFixed(0)}% • {step.confidence_label}
+                        </span>
                       </div>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-900 border border-slate-700 text-cyan-300 font-semibold">
-                        {(step.confidence * 100).toFixed(0)}% • {step.confidence_label}
-                      </span>
+
+                      {/* 🚨 Suspected Crime Inference */}
+                      {crime && crime.suspected_crime && (
+                        <div className={`p-2.5 rounded-lg border ${style.card} space-y-1.5 font-sans`}>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-1.5">
+                              <span className="text-xs">🚨</span>
+                              <span className="text-xs font-bold text-slate-100">
+                                {crime.suspected_crime}
+                              </span>
+                            </div>
+                            <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border ${style.badge}`}>
+                              {crime.crime_severity} Severity
+                            </span>
+                          </div>
+
+                          {crime.legal_statutes && crime.legal_statutes.length > 0 && (
+                            <div className="flex flex-wrap gap-1 pt-0.5">
+                              {crime.legal_statutes.map((statute, idx) => (
+                                <span
+                                  key={idx}
+                                  className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-slate-900/90 text-amber-300 border border-amber-500/20"
+                                >
+                                  ⚖️ {statute}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {crime.crime_rationale && (
+                            <p className="text-[10.5px] text-slate-300 leading-snug pt-0.5">
+                              <span className="font-semibold text-slate-200">Forensic Nexus: </span>
+                              {crime.crime_rationale}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {step.evidence && step.evidence.length > 0 && (
+                        <div className="text-[11px] text-slate-400 pl-4 border-l-2 border-slate-800 space-y-1">
+                          <div className="font-semibold text-slate-500 text-[10px] uppercase font-mono">Evidence Citations:</div>
+                          {step.evidence.map((ev, eIdx) => (
+                            <div key={eIdx}>• {ev}</div>
+                          ))}
+                        </div>
+                      )}
+
+                      {step.source_file && (
+                        <div className="text-[10px] text-slate-500 font-mono">
+                          Source Artifact: {step.source_file} {step.evidence_id ? `(${step.evidence_id})` : ''}
+                        </div>
+                      )}
                     </div>
-
-                    {step.evidence && step.evidence.length > 0 && (
-                      <div className="text-[11px] text-slate-400 pl-4 border-l-2 border-slate-800 space-y-1">
-                        <div className="font-semibold text-slate-500 text-[10px] uppercase font-mono">Evidence Citations:</div>
-                        {step.evidence.map((ev, eIdx) => (
-                          <div key={eIdx}>• {ev}</div>
-                        ))}
-                      </div>
-                    )}
-
-                    {step.source_file && (
-                      <div className="text-[10px] text-slate-500 font-mono">
-                        Source Artifact: {step.source_file} {step.evidence_id ? `(${step.evidence_id})` : ''}
-                      </div>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ) : (

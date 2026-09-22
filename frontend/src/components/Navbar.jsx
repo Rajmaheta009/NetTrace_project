@@ -22,6 +22,11 @@ export default function Navbar({
   setActiveTab, 
   health, 
   stats, 
+  vehicleCount = 0,
+  telecomCount = 0,
+  financialCount = 0,
+  locationCount = 0,
+  patternCount = 0,
   onReset,
   onLoadDemo,
   loading,
@@ -87,18 +92,22 @@ export default function Navbar({
             </div>
 
             {/* Active Case Selector Pill */}
-            {activeCase && onOpenCaseModal && (
+            {onOpenCaseModal && (
               <button
                 onClick={onOpenCaseModal}
                 className="hidden md:flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800/90 border border-slate-800 text-xs font-bold transition shadow-sm group cursor-pointer"
                 title="Click to Switch Active Case File"
               >
-                <FolderLock className="w-3.5 h-3.5 text-cyan-400 group-hover:scale-110 transition-transform" />
+                <FolderLock className={`w-3.5 h-3.5 ${activeCase ? 'text-cyan-400' : 'text-amber-400'} group-hover:scale-110 transition-transform`} />
                 <span className="text-slate-200 group-hover:text-cyan-300 truncate max-w-[140px]">
-                  {activeCase.case_name}
+                  {activeCase?.case_name || 'No Active Case'}
                 </span>
-                <span className="text-[9px] font-mono text-emerald-400 bg-emerald-500/15 px-1.5 py-0.2 rounded border border-emerald-500/30">
-                  {activeCase.status}
+                <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded border ${
+                  activeCase 
+                    ? 'text-emerald-400 bg-emerald-500/15 border-emerald-500/30' 
+                    : 'text-amber-400 bg-amber-500/15 border-amber-500/30'
+                }`}>
+                  {activeCase?.status || 'Select Case'}
                 </span>
               </button>
             )}
@@ -234,6 +243,20 @@ export default function Navbar({
                 <Zap className="w-3.5 h-3.5" />
               </button>
             </div>
+
+            {/* User Role & Login Switcher Pill */}
+            {onOpenRoleModal && (
+              <button
+                onClick={onOpenRoleModal}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800/90 border border-slate-800 text-xs font-bold transition shadow-sm group cursor-pointer hover:border-cyan-500/50"
+                title="Switch Role or Log In to Account"
+              >
+                <Shield className="w-3.5 h-3.5 text-cyan-400 group-hover:scale-110 transition-transform" />
+                <span className="text-slate-200 group-hover:text-cyan-300 font-mono text-[11px] truncate max-w-[120px]">
+                  {currentUser?.role?.value || currentUser?.role || 'Switch Role'}
+                </span>
+              </button>
+            )}
 
           </div>
 

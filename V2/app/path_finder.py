@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 import networkx as nx
 
 from app.models import ConnectionPathResponse, ConnectionPathStep, Entity
+from app.crime_inference import infer_crime_for_relationship
 
 
 def find_connection_path(
@@ -110,6 +111,14 @@ def find_connection_path(
         src_name = entities[u].name if u in entities else u
         tgt_name = entities[v].name if v in entities else v
 
+        crime_info = infer_crime_for_relationship(
+            relation_type=step_rel_type,
+            source_entity=entities.get(u),
+            target_entity=entities.get(v),
+            evidence=step_ev,
+            attributes=best_rel.attributes if best_rel else {},
+        )
+
         path_edges.append(
             ConnectionPathStep(
                 source_id=u,
@@ -122,6 +131,11 @@ def find_connection_path(
                 confidence_label=step_label,
                 evidence_id=ev_id,
                 source_file=src_file,
+                suspected_crime=crime_info.get("suspected_crime"),
+                crime_category=crime_info.get("crime_category"),
+                legal_statutes=crime_info.get("legal_statutes", []),
+                crime_severity=crime_info.get("crime_severity", "Moderate"),
+                crime_rationale=crime_info.get("crime_rationale"),
             )
         )
 

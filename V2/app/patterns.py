@@ -222,7 +222,11 @@ def detect_dense_subgroup_pattern(graph: nx.MultiGraph) -> List[PatternFlag]:
 
     # 2. Check maximal cliques of size >= DENSE_SUBGROUP_MIN_SIZE inside larger networks
     try:
+        clique_count = 0
         for clique in nx.find_cliques(simple_graph):
+            clique_count += 1
+            if clique_count > 100:  # DoS guard: limit clique evaluation on large/dense graphs
+                break
             if len(clique) >= DENSE_SUBGROUP_MIN_SIZE:
                 fkey = frozenset(clique)
                 if fkey not in seen_groups:
