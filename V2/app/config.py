@@ -84,15 +84,34 @@ REPEATED_COOCCURRENCE_MIN_EVENTS = int(
 # CORS CONFIGURATION
 # =========================================================
 
-DEFAULT_CORS = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000"
-CORS_ORIGINS = os.environ.get(
+# Local development origins
+DEFAULT_CORS = (
+    "http://localhost:5173,"
+    "http://127.0.0.1:5173,"
+    "http://localhost:8000,"
+    "http://127.0.0.1:8000"
+)
+
+# Read CORS origins from environment.
+# Multiple origins can be separated by commas.
+cors_env = os.environ.get(
     "CORS_ORIGINS",
     DEFAULT_CORS
-).split(",")
+)
 
-# Remove accidental spaces
 CORS_ORIGINS = [
-    origin.strip()
-    for origin in CORS_ORIGINS
+    origin.strip().rstrip("/")
+    for origin in cors_env.split(",")
     if origin.strip()
 ]
+
+# Production frontend URL.
+# Example:
+# FRONTEND_URL=https://your-project.vercel.app
+FRONTEND_URL = os.environ.get(
+    "FRONTEND_URL",
+    ""
+).strip().rstrip("/")
+
+if FRONTEND_URL and FRONTEND_URL not in CORS_ORIGINS:
+    CORS_ORIGINS.append(FRONTEND_URL)
