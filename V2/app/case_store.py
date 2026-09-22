@@ -24,7 +24,7 @@ from app.database import (
     EntityMergeDB,
     EvidenceDB,
     InvestigationLeadDB,
-    NoteDB,
+    NoteDB, 
     PatternFindingDB,
     RelationshipDB,
     SessionLocal,
@@ -1002,9 +1002,19 @@ class CaseManager:
 
     def __init__(self) -> None:
         self.cases: Dict[str, CaseStore] = {}
+        # The frontend and health endpoint expect a stable default case.
+        # Do not assume that case-001 already exists in the database.
         self.active_case_id: str = "case-001"
         self._lock = Lock()
         self._initialize_from_database()
+
+        # A fresh Render deployment can start with an empty database.
+        # Always make sure the stable default case exists before the API
+        # starts serving requests.
+        if not self.cases:
+            self._ensure_default_case()
+        elif self.active_case_id not in self.cases:
+            self.active_case_id = next(iter(self.cases))
 
     def _initialize_from_database(self) -> None:
         """Initializes database schema and re-hydrates cases from SQLite storage."""
@@ -1222,13 +1232,69 @@ class CaseManager:
         except Exception:
             pass
 
+    def _ensure_default_case(self) -> CaseStore:
+        """
+        Ensure that the stable system case ``case-001`` exists.
+
+        Render/production environments can have an empty or newly created
+        database. Older code only set ``active_case_id`` to ``case-001`` and
+        then indexed ``self.cases`` with that ID, which caused:
+
+            KeyError: 'case-001'
+
+        This method creates the case in memory and persists its metadata.
+        It intentionally does not fail startup if sample-data seeding fails;
+        the empty case is still a valid case and the API can start normally.
+        """
+        existing = self.cases.get("case-001")
+        if existing is not None:
+            return existing
+
+        case1 = CaseStore(
+            case_id="case-001",
+            case_name="Operation Falcon Shadow",
+            description="Default protected investigation case.",
+            investigation_type="organized_crime",
+            status=CaseStatus.OPEN,
+            priority="High",
+            is_protected=True,
+            created_by="System",
+        )
+
+        self.cases[case1.case_id] = case1
+        self.active_case_id = case1.case_id
+
+        try:
+            case1._sync_case_db()
+        except Exception as exc:
+            logger.exception("Unable to persist default case-001: %s", exc)
+
+        # Seed demo/sample data when it is available. Any failure here must
+        # not prevent the API from starting.
+        try:
+            if not case1.entities:
+                self._seed_case_one(case1)
+        except Exception as exc:
+            logger.warning("Default case seeding skipped: %s", exc)
+
+        return case1
+
     def get_active_case(self) -> CaseStore:
         with self._lock:
-            if self.active_case_id not in self.cases:
-                self.active_case_id = next(iter(self.cases.keys()), "case-001")
-                if self.active_case_id not in self.cases:
-                    self._initialize_from_database()
-            return self.cases[self.active_case_id]
+            # Normal path.
+            active = self.cases.get(self.active_case_id)
+            if active is not None:
+                return active
+
+            # The active ID can become stale after a fresh deploy, database
+            # reset, or case deletion. Prefer an existing case if one exists.
+            if self.cases:
+                self.active_case_id = next(iter(self.cases))
+                return self.cases[self.active_case_id]
+
+            # Database may have been empty on a fresh Render instance. Create
+            # the stable default case instead of raising KeyError.
+            return self._ensure_default_case()
 
     def get_case(self, case_id: str) -> Optional[CaseStore]:
         with self._lock:
@@ -1328,9 +1394,13 @@ class CaseManager:
 
             del self.cases[case_id]
             if self.active_case_id == case_id:
-                self.active_case_id = next(iter(self.cases.keys()), "case-001")
-                if self.active_case_id not in self.cases:
-                    self._initialize_from_database()
+                if self.cases:
+                    self.active_case_id = next(iter(self.cases))
+                else:
+                    # Never leave active_case_id pointing to a non-existent
+                    # case. Recreate the protected system case if the last
+                    # user-created case was deleted.
+                    self._ensure_default_case()
             return True, f"Case '{case_id}' successfully deleted."
 
     def list_cases(self) -> List[Case]:
