@@ -519,11 +519,6 @@ export default function App() {
     return validationQueue?.filter(v => v?.status === 'Needs Review')?.length ?? 0;
   }, [validationQueue]);
 
-  const isAdmin = useMemo(() => {
-    return currentUser?.roles?.some(r => ['ADMIN', 'SUPER_ADMIN'].includes(String(r).toUpperCase().replace(' ', '_'))) ||
-           ['ADMIN', 'SUPER_ADMIN'].includes(String(currentUser?.role?.value || currentUser?.role || '').toUpperCase().replace(' ', '_'));
-  }, [currentUser]);
-
   return (
     <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] flex flex-col antialiased transition-colors duration-300">
       
