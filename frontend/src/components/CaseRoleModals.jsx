@@ -12,6 +12,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { fetchCases, createCase, switchCase, switchUserRole, loginUser } from '../services/api';
+import { can } from '../utils/permissions';
 
 const CRIME_PROFILE_OPTIONS = [
   { id: 'murder_homicide', label: 'Murder / Homicide' },
@@ -34,7 +35,7 @@ const PRIORITY_OPTIONS = [
   { id: 'Low', label: 'Low', color: 'text-slate-400 bg-slate-800/40 border-slate-700/50' },
 ];
 
-export function CaseSwitcherModal({ isOpen, onClose, activeCase, onCaseSwitched }) {
+export function CaseSwitcherModal({ isOpen, onClose, activeCase, onCaseSwitched, currentUser }) {
   const [cases, setCases] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -42,12 +43,13 @@ export function CaseSwitcherModal({ isOpen, onClose, activeCase, onCaseSwitched 
   const [newDesc, setNewDesc] = useState('');
   const [newType, setNewType] = useState('organized_crime');
   const [newPriority, setNewPriority] = useState('High');
+  const [nameError, setNameError] = useState('');
 
   const load = async () => {
     setLoading(true);
     try {
       const list = await fetchCases();
-      setCases(list);
+      setCases(Array.isArray(list) ? list : []);
     } catch (err) {
       console.error('Failed to load cases:', err);
     } finally {
@@ -59,6 +61,7 @@ export function CaseSwitcherModal({ isOpen, onClose, activeCase, onCaseSwitched 
     if (isOpen) {
       load();
       setIsCreating(false);
+      setNameError('');
     }
   }, [isOpen]);
 
@@ -68,7 +71,7 @@ export function CaseSwitcherModal({ isOpen, onClose, activeCase, onCaseSwitched 
     setLoading(true);
     try {
       await switchCase(caseId);
-      if (onCaseSwitched) onCaseSwitched(caseId);
+      if (onCaseSwitched) onCaseSwitched(caseId, true);
       onClose();
     } catch (err) {
       alert('Failed to switch case: ' + err.message);
@@ -79,11 +82,15 @@ export function CaseSwitcherModal({ isOpen, onClose, activeCase, onCaseSwitched 
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    if (!newName.trim()) return;
+    if (!newName.trim()) {
+      setNameError('Case Name is required.');
+      return;
+    }
+    setNameError('');
     setLoading(true);
     try {
       const created = await createCase(newName.trim(), newDesc.trim(), newType, newPriority);
-      if (onCaseSwitched) onCaseSwitched(created.case_id);
+      if (onCaseSwitched) onCaseSwitched(created.case_id, true);
       onClose();
     } catch (err) {
       alert('Failed to create case: ' + err.message);
@@ -112,76 +119,113 @@ export function CaseSwitcherModal({ isOpen, onClose, activeCase, onCaseSwitched 
           <>
             <div className="flex items-center justify-between">
               <span className="text-xs text-slate-400">Select active workspace:</span>
-              <button
-                onClick={() => setIsCreating(true)}
-                className="flex items-center space-x-1 text-xs font-bold text-cyan-400 hover:text-cyan-300 cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>New Case File</span>
-              </button>
+              {can(currentUser, 'CASE_CREATE') && (
+                <button
+                  onClick={() => {
+                    setNameError('');
+                    setIsCreating(true);
+                  }}
+                  className="flex items-center space-x-1 text-xs font-bold text-cyan-400 hover:text-cyan-300 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>New Case File</span>
+                </button>
+              )}
             </div>
 
-            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-              {cases.map((c) => {
-                const isActive = activeCase?.case_id === c.case_id;
-                return (
-                  <div
-                    key={c.case_id}
-                    onClick={() => handleSwitch(c.case_id)}
-                    className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
-                      isActive
-                        ? 'bg-cyan-950/40 border-cyan-500/50 ring-1 ring-cyan-500/50 shadow-md'
-                        : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 text-slate-300'
-                    }`}
+            {cases.length === 0 && !loading ? (
+              <div className="p-6 text-center bg-slate-950/60 border border-slate-800 rounded-2xl space-y-3">
+                <FolderLock className="w-8 h-8 text-amber-400 mx-auto" />
+                <p className="text-xs font-bold text-slate-200">No Cases Found</p>
+                <p className="text-[11px] text-slate-400">
+                  You don't have any cases yet. Create your first case to start an investigation.
+                </p>
+                {can(currentUser, 'CASE_CREATE') && (
+                  <button
+                    onClick={() => {
+                      setNameError('');
+                      setIsCreating(true);
+                    }}
+                    className="px-4 py-2 rounded-xl bg-cyan-500 text-slate-950 font-bold text-xs hover:bg-cyan-400 cursor-pointer"
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs font-mono font-bold text-cyan-300">{c.case_id}</span>
-                        <span className="text-xs font-bold text-slate-200">{c.case_name}</span>
-                        {c.is_protected && (
-                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-950/60 border border-amber-800/60 text-amber-300">
-                            Protected Default
+                    + Create First Case
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {cases.map((c) => {
+                  const isActive = activeCase?.case_id === c.case_id;
+                  return (
+                    <div
+                      key={c.case_id}
+                      onClick={() => handleSwitch(c.case_id)}
+                      className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
+                        isActive
+                          ? 'bg-cyan-950/40 border-cyan-500/50 ring-1 ring-cyan-500/50 shadow-md'
+                          : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs font-mono font-bold text-cyan-300">{c.case_id}</span>
+                          <span className="text-xs font-bold text-slate-200">{c.case_name}</span>
+                          {c.is_protected && (
+                            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-950/60 border border-amber-800/60 text-amber-300">
+                              Protected Default
+                            </span>
+                          )}
+                        </div>
+                        {isActive && (
+                          <span className="flex items-center space-x-1 text-[10px] font-mono font-bold text-cyan-400">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Active</span>
                           </span>
                         )}
                       </div>
-                      {isActive && (
-                        <span className="flex items-center space-x-1 text-[10px] font-mono font-bold text-cyan-400">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Active</span>
-                        </span>
+                      {c.description && (
+                        <p className="text-[11px] text-slate-400 mt-1 line-clamp-2 leading-relaxed">
+                          {c.description}
+                        </p>
                       )}
+                      <div className="flex items-center space-x-3 text-[10px] font-mono text-slate-500 mt-2">
+                        <span>Type: {c.investigation_type}</span>
+                        <span>•</span>
+                        <span>Priority: {c.priority}</span>
+                        <span>•</span>
+                        <span>Entities: {c.entity_count || 0}</span>
+                        <span>•</span>
+                        <span>Evidence: {c.evidence_count || 0}</span>
+                      </div>
                     </div>
-                    {c.description && (
-                      <p className="text-[11px] text-slate-400 mt-1 line-clamp-2 leading-relaxed">
-                        {c.description}
-                      </p>
-                    )}
-                    <div className="flex items-center space-x-3 text-[10px] font-mono text-slate-500 mt-2">
-                      <span>Type: {c.investigation_type}</span>
-                      <span>•</span>
-                      <span>Priority: {c.priority}</span>
-                      <span>•</span>
-                      <span>Entities: {c.entity_count || 0}</span>
-                      <span>•</span>
-                      <span>Evidence: {c.evidence_count || 0}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </>
         ) : (
           <form onSubmit={handleCreate} className="space-y-3 text-xs">
             <div>
-              <label className="block text-slate-400 mb-1 font-semibold">Case Title *</label>
+              <label className="block text-slate-400 mb-1 font-semibold">
+                Case Title <span className="text-rose-400">*</span>
+              </label>
               <input
                 type="text"
-                required
                 placeholder="e.g. Operation Deep Shadow"
                 value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500"
+                onChange={(e) => {
+                  setNewName(e.target.value);
+                  if (e.target.value.trim()) setNameError('');
+                }}
+                className={`w-full px-3 py-2 bg-slate-950 border rounded-xl text-slate-200 focus:outline-none transition-colors ${
+                  nameError ? 'border-rose-500 ring-1 ring-rose-500/30' : 'border-slate-800 focus:border-cyan-500'
+                }`}
               />
+              {nameError && (
+                <p className="text-[11px] font-semibold text-rose-400 mt-1 flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" /> {nameError}
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-slate-400 mb-1 font-semibold">Description</label>
@@ -223,6 +267,11 @@ export function CaseSwitcherModal({ isOpen, onClose, activeCase, onCaseSwitched 
                 </select>
               </div>
             </div>
+
+            <div className="p-2.5 bg-cyan-950/30 border border-cyan-900/40 rounded-xl text-[10px] text-cyan-300 font-mono">
+              Auto-assigned sequence ID: <strong>CASE-{new Date().getFullYear()}-NNNN</strong>
+            </div>
+
             <div className="flex items-center justify-between pt-2">
               <button
                 type="button"
@@ -233,10 +282,10 @@ export function CaseSwitcherModal({ isOpen, onClose, activeCase, onCaseSwitched 
               </button>
               <button
                 type="submit"
-                disabled={loading || !newName.trim()}
-                className="px-4 py-2 rounded-xl bg-cyan-500 text-slate-950 font-bold hover:bg-cyan-400 cursor-pointer"
+                disabled={loading}
+                className="px-4 py-2 rounded-xl bg-cyan-500 text-slate-950 font-bold hover:bg-cyan-400 cursor-pointer disabled:opacity-50"
               >
-                Create & Switch
+                {loading ? 'Creating...' : 'Create & Open Workspace'}
               </button>
             </div>
           </form>

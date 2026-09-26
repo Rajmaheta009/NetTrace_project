@@ -9,8 +9,9 @@ import {
   Tag
 } from 'lucide-react';
 import { fetchNotes, createNote, deleteNote } from '../services/api';
+import { can } from '../utils/permissions';
 
-export default function NotesView({ activeCase, graphData }) {
+export default function NotesView({ activeCase, graphData, currentUser }) {
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -84,13 +85,15 @@ export default function NotesView({ activeCase, graphData }) {
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-cyan-400' : ''}`} />
           </button>
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 transition-all shadow-lg shadow-amber-500/20 cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Field Note</span>
-          </button>
+          {can(currentUser, 'NOTE_CREATE') && (
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs hover:bg-amber-400 transition-all shadow-lg shadow-amber-500/20 cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Field Note</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -129,13 +132,15 @@ export default function NotesView({ activeCase, graphData }) {
                 <span className="flex items-center gap-1">
                   <User className="w-3 h-3" /> {note.created_by}
                 </span>
-                <button
-                  onClick={() => handleDelete(note.note_id)}
-                  className="text-slate-500 hover:text-red-400 transition-colors cursor-pointer"
-                  title="Delete Note"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {can(currentUser, 'NOTE_DELETE') && (
+                  <button
+                    onClick={() => handleDelete(note.note_id)}
+                    className="text-slate-500 hover:text-red-400 transition-colors cursor-pointer"
+                    title="Delete Note"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
           ))

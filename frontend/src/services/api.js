@@ -212,8 +212,18 @@ export async function fetchInspectorIndicators(userId = null) {
 // -------------------------------------------------------------
 // Case Management APIs
 // -------------------------------------------------------------
-export async function fetchCases() {
-  const res = await fetch(`${API_BASE}/api/cases`, { headers: getAuthHeaders() });
+export async function fetchCases(params = {}) {
+  const query = new URLSearchParams();
+  if (params.search) query.append('search', params.search);
+  if (params.status && params.status !== 'all') query.append('status', params.status);
+  if (params.investigation_type && params.investigation_type !== 'all') query.append('investigation_type', params.investigation_type);
+  if (params.priority && params.priority !== 'all') query.append('priority', params.priority);
+  if (params.sort_by) query.append('sort_by', params.sort_by);
+  if (params.sort_order) query.append('sort_order', params.sort_order);
+
+  const qs = query.toString();
+  const url = qs ? `${API_BASE}/api/cases?${qs}` : `${API_BASE}/api/cases`;
+  const res = await fetch(url, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error(`Failed to fetch cases: ${res.status}`);
   return res.json();
 }

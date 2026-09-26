@@ -58,6 +58,7 @@ import {
   loadDemoGraph,
   fetchActiveCase,
   switchCase,
+  fetchCases,
   fetchCurrentUser,
   fetchEvidence,
   fetchValidationRecords,
@@ -66,6 +67,12 @@ import {
   fetchCrimeProfiles,
   updateCaseInvestigationType
 } from './services/api';
+import {
+  isTabAuthorized,
+  getDefaultAuthorizedTab,
+  can,
+  isAdmin,
+} from './utils/permissions';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('graph');
@@ -74,6 +81,7 @@ export default function App() {
   
   // Case & RBAC State
   const [activeCase, setActiveCase] = useState(null);
+  const [userCases, setUserCases] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [crimeProfiles, setCrimeProfiles] = useState([]);
   const [deepInspectEntityId, setDeepInspectEntityId] = useState(null);
@@ -126,6 +134,14 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, []);
 
+  // Direct Route / Tab Authorization Enforcer: Redirect unauthorized tab access immediately to default authorized tab
+  useEffect(() => {
+    if (currentUser && !isTabAuthorized(currentUser, activeTab, Boolean(activeCase))) {
+      const fallbackTab = getDefaultAuthorizedTab(currentUser, Boolean(activeCase));
+      setActiveTab(fallbackTab);
+    }
+  }, [currentUser, activeTab, activeCase]);
+
   // Investigation Case & Context Hydration Status
   const [caseLoadStatus, setCaseLoadStatus] = useState('idle'); // 'idle' | 'loading' | 'success' | 'unauthorized' | 'not_found' | 'error'
   const [caseLoadError, setCaseLoadError] = useState(null);
@@ -159,8 +175,9 @@ export default function App() {
 
     try {
       // Step 1: Verify authenticated user & roles
+      let curUser = null;
       try {
-        const curUser = await fetchCurrentUser();
+        curUser = await fetchCurrentUser();
         if (curUser) {
           setCurrentUser(curUser);
         }
@@ -171,16 +188,42 @@ export default function App() {
         }
       }
 
-      // Step 2: Switch case if targetCaseId provided, else fetch currently active case
+      // Step 2: Fetch user's authorized cases
+      let casesList = [];
+      try {
+        casesList = await fetchCases();
+        const validList = Array.isArray(casesList) ? casesList : [];
+        setUserCases(validList);
+        casesList = validList;
+      } catch (cErr) {
+        console.warn('Cases list fetch notice:', cErr.message);
+        casesList = [];
+        setUserCases([]);
+      }
+
+      // Step 3: Determine target case to load
+      const savedCaseId = localStorage.getItem('nettrace_active_case_id');
+      let caseIdToLoad = targetCaseId;
+
+      if (!caseIdToLoad) {
+        // If saved in localStorage and is authorized for this user
+        if (savedCaseId && casesList.some(c => c.case_id === savedCaseId)) {
+          caseIdToLoad = savedCaseId;
+        } else if (casesList.length > 0) {
+          caseIdToLoad = casesList[0].case_id;
+        }
+      }
+
       let activeC = null;
-      if (targetCaseId) {
+      if (caseIdToLoad) {
         try {
-          const switchRes = await switchCase(targetCaseId);
+          const switchRes = await switchCase(caseIdToLoad);
           activeC = switchRes?.case || switchRes;
           setCaseLoadStatus('success');
           setCaseLoadError(null);
+          localStorage.setItem('nettrace_active_case_id', activeC.case_id);
         } catch (switchErr) {
-          console.warn(`Failed to switch active case to ${targetCaseId}:`, switchErr.message);
+          console.warn(`Failed to switch active case to ${caseIdToLoad}:`, switchErr.message);
           const msg = switchErr.message || '';
           if (msg.includes('403') || msg.toLowerCase().includes('denied') || msg.toLowerCase().includes('not assigned')) {
             setCaseLoadStatus('unauthorized');
@@ -193,36 +236,22 @@ export default function App() {
             setCaseLoadError(msg || 'Failed to switch case.');
           }
           activeC = null;
+          localStorage.removeItem('nettrace_active_case_id');
         }
       } else {
-        try {
-          activeC = await fetchActiveCase();
-          setCaseLoadStatus('success');
-          setCaseLoadError(null);
-        } catch (caseErr) {
-          const msg = caseErr.message || '';
-          if (msg.includes('403') || msg.toLowerCase().includes('denied') || msg.toLowerCase().includes('not assigned')) {
-            setCaseLoadStatus('unauthorized');
-            setCaseLoadError('Access Denied: You are not assigned to this case file.');
-            activeC = null;
-          } else if (msg.includes('404') || msg.toLowerCase().includes('not found')) {
-            setCaseLoadStatus('not_found');
-            setCaseLoadError('No active investigation selected.');
-            activeC = null;
-          } else {
-            setCaseLoadStatus('error');
-            setCaseLoadError(msg || 'Failed to retrieve active case.');
-            activeC = null;
-          }
-        }
+        // User has 0 authorized cases (e.g. first-time user)
+        setCaseLoadStatus('not_found');
+        setCaseLoadError('No cases found. Create your first case to start an investigation.');
+        activeC = null;
+        localStorage.removeItem('nettrace_active_case_id');
       }
 
       if (activeC) {
         setActiveCase(activeC);
         setCaseLoadStatus('success');
-        const caseId = activeC?.case_id || targetCaseId || null;
+        const caseId = activeC?.case_id || caseIdToLoad || null;
 
-        // Step 3: Priority core investigation fetch (Graph, Centrality, Patterns, Crime Profiles, Health)
+        // Step 4: Core investigation fetch (Graph, Centrality, Patterns, Crime Profiles, Health)
         const [h, g, c, p, cProfiles] = await Promise.all([
           checkHealth().catch(() => null),
           fetchGraph().catch(() => ({ nodes: [], links: [] })),
@@ -237,7 +266,7 @@ export default function App() {
         setPatternFlags(Array.isArray(p) ? p : (p?.patterns || []));
         if (cProfiles && cProfiles.length) setCrimeProfiles(Array.isArray(cProfiles) ? cProfiles : (cProfiles?.profiles || []));
 
-        // Step 4: Secondary deferred hydration (Evidence, Validation, Communities, Notes)
+        // Step 5: Secondary deferred hydration (Evidence, Validation, Communities, Notes)
         Promise.all([
           fetchEvidence(caseId).catch(() => []),
           fetchValidationRecords(caseId).catch(() => []),
@@ -394,13 +423,17 @@ export default function App() {
     setDeepInspectEntityId(entityId);
   };
 
-  const handleCaseSwitched = async (newCaseId) => {
+  const handleCaseSwitched = async (newCaseId, shouldOpenWorkspace = false) => {
     setSelectedEntityId(null);
     setEntityDetail(null);
     setIsDrawerOpen(false);
     setHighlightedCommunity(null);
     setHighlightedPath(null);
+    localStorage.setItem('nettrace_active_case_id', newCaseId);
     await loadActiveCaseAndContext(newCaseId);
+    if (shouldOpenWorkspace) {
+      setActiveTab('graph');
+    }
   };
 
   // Reset graph: clear all memory data and empty diagram completely
@@ -594,7 +627,7 @@ export default function App() {
             )}
 
             {/* No Active Case Selected Empty State Alert */}
-            {caseLoadStatus === 'not_found' && !activeCase && (
+            {caseLoadStatus === 'not_found' && !activeCase && activeTab !== 'cases' && (
               <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center justify-between text-xs text-amber-300 shadow-lg animate-in fade-in">
                 <div className="flex items-center space-x-3">
                   <FolderLock className="w-5 h-5 text-amber-400 flex-shrink-0" />
@@ -632,7 +665,7 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'graph' && (
+              {activeTab === 'graph' && isTabAuthorized(currentUser, 'graph') && (
                 <GraphView
                   graphData={graphData}
                   activeCase={activeCase}
@@ -643,8 +676,8 @@ export default function App() {
                   onDeepInspect={handleOpenDeepInspect}
                   crimeProfile={crimeProfiles.find(p => p.id === (activeCase?.investigation_type || 'organized_crime'))}
                   onRefresh={loadAllData}
-                  onOpenIngest={() => setActiveTab('ingest')}
-                  onLoadDemo={handleLoadDemo}
+                  onOpenIngest={can(currentUser, 'EVIDENCE_UPLOAD') ? () => setActiveTab('ingest') : null}
+                  onLoadDemo={can(currentUser, 'EVIDENCE_UPLOAD') || isAdmin(currentUser) ? handleLoadDemo : null}
                   theme={theme}
                   highlightedCommunity={highlightedCommunity}
                   onClearCommunityHighlight={() => setHighlightedCommunity(null)}
@@ -653,36 +686,39 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'cases' && (
+              {activeTab === 'cases' && isTabAuthorized(currentUser, 'cases') && (
                 <CasesView
                   activeCase={activeCase}
                   onCaseSwitched={handleCaseSwitched}
+                  currentUser={currentUser}
                 />
               )}
 
-              {activeTab === 'evidence' && (
+              {activeTab === 'evidence' && isTabAuthorized(currentUser, 'evidence') && (
                 <EvidenceView
                   activeCase={activeCase}
+                  currentUser={currentUser}
                 />
               )}
 
-              {activeTab === 'validation' && (
+              {activeTab === 'validation' && isTabAuthorized(currentUser, 'validation') && (
                 <ValidationCenter
                   activeCase={activeCase}
                   graphData={graphData}
                   onReviewCompleted={loadAllData}
                   onDeepInspect={handleOpenDeepInspect}
+                  currentUser={currentUser}
                 />
               )}
 
-              {activeTab === 'communities' && (
+              {activeTab === 'communities' && isTabAuthorized(currentUser, 'communities') && (
                 <CommunitiesView
                   activeCase={activeCase}
                   onHighlightInGraph={handleHighlightCommunityInGraph}
                 />
               )}
 
-              {activeTab === 'connections' && (
+              {activeTab === 'connections' && isTabAuthorized(currentUser, 'connections') && (
                 <ConnectionFinderView
                   activeCase={activeCase}
                   graphData={graphData}
@@ -690,24 +726,25 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'notes' && (
+              {activeTab === 'notes' && isTabAuthorized(currentUser, 'notes') && (
                 <NotesView
                   activeCase={activeCase}
                   graphData={graphData}
+                  currentUser={currentUser}
                 />
               )}
 
-              {activeTab === 'reports' && (
+              {activeTab === 'reports' && isTabAuthorized(currentUser, 'reports') && (
                 <ReportsView
                   activeCase={activeCase}
                 />
               )}
 
-              {activeTab === 'audit' && (
+              {activeTab === 'audit' && isTabAuthorized(currentUser, 'audit') && (
                 <AuditView />
               )}
 
-              {activeTab === 'vehicles' && (
+              {activeTab === 'vehicles' && isTabAuthorized(currentUser, 'vehicles') && (
                 <VehiclesView
                   graphData={graphData}
                   patterns={patternFlags}
@@ -716,7 +753,7 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'telecom' && (
+              {activeTab === 'telecom' && isTabAuthorized(currentUser, 'telecom') && (
                 <TelecomView
                   graphData={graphData}
                   patterns={patternFlags}
@@ -725,7 +762,7 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'financial' && (
+              {activeTab === 'financial' && isTabAuthorized(currentUser, 'financial') && (
                 <FinancialView
                   graphData={graphData}
                   patterns={patternFlags}
@@ -734,7 +771,7 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'locations' && (
+              {activeTab === 'locations' && isTabAuthorized(currentUser, 'locations') && (
                 <LocationsView
                   graphData={graphData}
                   onInspectEntity={handleSelectEntity}
@@ -742,7 +779,7 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'timeline' && (
+              {activeTab === 'timeline' && isTabAuthorized(currentUser, 'timeline') && (
                 <TimelineView
                   graphData={graphData}
                   onNavigateToGraph={handleNavigateToGraph}
@@ -750,14 +787,14 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'centrality' && (
+              {activeTab === 'centrality' && isTabAuthorized(currentUser, 'centrality') && (
                 <CentralityTable
                   centralityData={centralityList}
                   onInspectEntity={handleNavigateToGraph}
                 />
               )}
 
-              {activeTab === 'patterns' && (
+              {activeTab === 'patterns' && isTabAuthorized(currentUser, 'patterns') && (
                 <PatternsRadar
                   patterns={patternFlags}
                   onSelectEntity={handleNavigateToGraph}
@@ -766,7 +803,7 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'summary' && (
+              {activeTab === 'summary' && isTabAuthorized(currentUser, 'dashboard') && (
                 <SummaryView
                   summaryData={summaryData}
                   loading={summaryLoading}
@@ -775,7 +812,7 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'ingest' && (
+              {activeTab === 'ingest' && isTabAuthorized(currentUser, 'ingest') && (
                 <IngestPanel
                   onIngestSuccess={() => {
                     loadAllData();
@@ -784,29 +821,11 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'admin' && (
-                isAdmin ? (
-                  <AdminPanel
-                    currentUser={currentUser}
-                    onRoleSwitched={loadAllData}
-                  />
-                ) : (
-                  <div className="p-10 text-center bg-slate-900/90 border border-rose-800/40 rounded-3xl max-w-lg mx-auto mt-12 space-y-4 shadow-2xl animate-in fade-in">
-                    <div className="w-14 h-14 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mx-auto text-rose-400">
-                      <ShieldAlert className="w-7 h-7" />
-                    </div>
-                    <h2 className="text-lg font-bold text-white">Access Denied: Administration Console</h2>
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      The Administration & RBAC panel requires <strong>Administrator</strong> or <strong>Super Admin</strong> credentials. Your current role is <strong>{currentUser?.role?.value || currentUser?.role || 'User'}</strong>.
-                    </p>
-                    <button
-                      onClick={() => setActiveTab('graph')}
-                      className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-200 transition cursor-pointer"
-                    >
-                      Return to Operational Graph
-                    </button>
-                  </div>
-                )
+              {activeTab === 'admin' && isAdmin(currentUser) && (
+                <AdminPanel
+                  currentUser={currentUser}
+                  onRoleSwitched={loadAllData}
+                />
               )}
 
 
@@ -827,8 +846,8 @@ export default function App() {
             patterns={patternFlags}
             onSelectEntity={handleSelectEntity}
             onNavigateToGraph={handleNavigateToGraph}
-            onOpenIngest={() => setActiveTab('ingest')}
-            onLoadDemo={handleLoadDemo}
+            onOpenIngest={can(currentUser, 'EVIDENCE_UPLOAD') ? () => setActiveTab('ingest') : null}
+            onLoadDemo={can(currentUser, 'EVIDENCE_UPLOAD') || isAdmin(currentUser) ? handleLoadDemo : null}
           />
         </Suspense>
       )}
@@ -870,6 +889,7 @@ export default function App() {
             onClose={() => setIsCaseModalOpen(false)}
             activeCase={activeCase}
             onCaseSwitched={handleCaseSwitched}
+            currentUser={currentUser}
           />
         </Suspense>
       )}

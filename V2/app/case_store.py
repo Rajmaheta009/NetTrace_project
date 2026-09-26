@@ -1461,6 +1461,51 @@ class CaseManager:
             self.active_case_id = case_id
             return self.cases[case_id]
 
+    def _generate_case_id(self) -> str:
+        """
+        Generates a human-readable, deterministic sequential case ID.
+        Format: CASE-{YEAR}-{NNNN} (e.g., CASE-2026-0001).
+        Guarantees uniqueness across in-memory stores and SQLite/PostgreSQL persistence.
+        """
+        import re
+        year = datetime.now().year
+        prefix = f"CASE-{year}-"
+        pattern = re.compile(rf"^CASE-{year}-(\d+)$", re.IGNORECASE)
+        existing_numbers = []
+
+        # Inspect in-memory cases
+        for cid in self.cases.keys():
+            m = pattern.match(cid)
+            if m:
+                try:
+                    existing_numbers.append(int(m.group(1)))
+                except ValueError:
+                    pass
+
+        # Inspect database cases
+        db = SessionLocal()
+        try:
+            db_case_ids = db.query(CaseDB.case_id).filter(CaseDB.case_id.like(f"{prefix}%")).all()
+            for (cid,) in db_case_ids:
+                m = pattern.match(cid)
+                if m:
+                    try:
+                        existing_numbers.append(int(m.group(1)))
+                    except ValueError:
+                        pass
+        except Exception as e:
+            logger.warning(f"Error checking existing case IDs in DB: {e}")
+        finally:
+            db.close()
+
+        next_num = max(existing_numbers, default=0) + 1
+        new_id = f"CASE-{year}-{next_num:04d}"
+        while new_id in self.cases:
+            next_num += 1
+            new_id = f"CASE-{year}-{next_num:04d}"
+
+        return new_id
+
     def create_case(
         self,
         case_name: str,
@@ -1468,9 +1513,14 @@ class CaseManager:
         investigation_type: str = "organized_crime",
         priority: str = "High",
         created_by: str = "Officer Vikram",
+        case_id: Optional[str] = None,
     ) -> CaseStore:
         with self._lock:
-            case_id = f"case-{uuid.uuid4().hex[:6]}"
+            if not case_id or not case_id.strip():
+                case_id = self._generate_case_id()
+            else:
+                case_id = case_id.strip()
+
             new_store = CaseStore(
                 case_id=case_id,
                 case_name=case_name,

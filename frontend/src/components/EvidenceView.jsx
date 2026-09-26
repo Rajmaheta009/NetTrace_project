@@ -12,8 +12,9 @@ import {
   Hash
 } from 'lucide-react';
 import { fetchEvidence, registerEvidence } from '../services/api';
+import { can } from '../utils/permissions';
 
-export default function EvidenceView({ activeCase }) {
+export default function EvidenceView({ activeCase, currentUser }) {
   const [evidenceList, setEvidenceList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -98,13 +99,15 @@ export default function EvidenceView({ activeCase }) {
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-cyan-400' : ''}`} />
           </button>
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Register Surveillance File</span>
-          </button>
+          {can(currentUser, 'EVIDENCE_UPLOAD') && (
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-emerald-500 text-slate-950 font-bold text-xs hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20 cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Register Surveillance File</span>
+            </button>
+          )}
         </div>
       </div>
 

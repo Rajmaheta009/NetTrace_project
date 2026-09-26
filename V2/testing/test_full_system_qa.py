@@ -344,7 +344,7 @@ class TestNetTraceFullSystemQA(unittest.TestCase):
         self.assertEqual(res_create.status_code, 200, f"Case creation failed: {res_create.text}")
         case_data = res_create.json()
         case_id = case_data["case_id"]
-        self.assertTrue(case_id.startswith("case-"))
+        self.assertTrue(case_id.lower().startswith("case-"))
 
         try:
             # Step 2: Ingest structured evidence CSV into this case

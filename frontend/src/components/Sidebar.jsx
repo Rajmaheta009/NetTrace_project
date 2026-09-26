@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   LayoutDashboard,
   Network,
@@ -23,6 +23,7 @@ import {
   User,
   ShieldAlert
 } from 'lucide-react';
+import { getAuthorizedNavItems, can, isTabAuthorized } from '../utils/permissions';
 
 export default function Sidebar({
   activeTab,
@@ -39,10 +40,7 @@ export default function Sidebar({
   collapsed,
   setCollapsed,
 }) {
-  const isAdmin = currentUser?.roles?.some(r => ['ADMIN', 'SUPER_ADMIN'].includes(String(r).toUpperCase().replace(' ', '_'))) ||
-                  ['ADMIN', 'SUPER_ADMIN'].includes(String(currentUser?.role?.value || currentUser?.role || '').toUpperCase().replace(' ', '_'));
-
-  const navSections = [
+  const rawNavSections = [
     {
       title: 'Command & Core',
       items: [
@@ -79,10 +77,15 @@ export default function Sidebar({
         { id: 'audit', label: 'Investigation History', icon: History },
         { id: 'ingest', label: 'Data Ingestion', icon: UploadCloud },
         { id: 'cases', label: 'Case Files Manager', icon: FolderLock },
-        ...(isAdmin ? [{ id: 'admin', label: 'Administration & RBAC', icon: ShieldAlert, special: true }] : []),
+        { id: 'admin', label: 'Administration & RBAC', icon: ShieldAlert, special: true },
       ],
     },
   ];
+
+  // Dynamically resolve only the sections and tabs authorized for the current user's role and case status
+  const navSections = useMemo(() => {
+    return getAuthorizedNavItems(currentUser, rawNavSections, Boolean(activeCase));
+  }, [currentUser, activeCase, evidenceCount, validationCount, patternCount, notesCount]);
 
   const getRoleBadgeColor = (role) => {
     const r = String(role || '').toUpperCase().replace(' ', '_');
@@ -109,34 +112,49 @@ export default function Sidebar({
           <div className="flex flex-col space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold flex items-center gap-1.5">
-                <FolderLock className="w-3 h-3 text-cyan-400" /> Active Case
+                <FolderLock className={`w-3 h-3 ${activeCase ? 'text-cyan-400' : 'text-amber-400'}`} />
+                {activeCase ? 'Active Case' : 'No Case Selected'}
               </span>
               <button
                 onClick={onOpenCaseModal}
                 className="text-[10px] font-mono text-cyan-400 hover:text-cyan-300 hover:underline cursor-pointer"
                 title="Switch or Create Case"
               >
-                Switch
+                {activeCase ? 'Switch' : 'Select'}
               </button>
             </div>
-            <div
-              onClick={onOpenCaseModal}
-              className="bg-slate-900/90 hover:bg-slate-800/90 border border-slate-800 rounded-lg p-2 cursor-pointer transition-colors group"
-            >
-              <div className="text-xs font-bold text-slate-200 group-hover:text-cyan-300 truncate">
-                {activeCase?.case_name || 'Operation Falcon Shadow'}
+            {activeCase ? (
+              <div
+                onClick={onOpenCaseModal}
+                className="bg-slate-900/90 hover:bg-slate-800/90 border border-slate-800 rounded-lg p-2 cursor-pointer transition-colors group"
+              >
+                <div className="text-xs font-bold text-slate-200 group-hover:text-cyan-300 truncate">
+                  {activeCase.case_name}
+                </div>
+                <div className="flex items-center justify-between mt-1 text-[10px] text-slate-400 font-mono">
+                  <span>{activeCase.case_id}</span>
+                  <span className="text-emerald-400 font-semibold">{activeCase.status || 'Open'}</span>
+                </div>
               </div>
-              <div className="flex items-center justify-between mt-1 text-[10px] text-slate-400 font-mono">
-                <span>{activeCase?.case_id || 'case-001'}</span>
-                <span className="text-emerald-400 font-semibold">{activeCase?.status || 'Open'}</span>
-              </div>
-            </div>
+            ) : (
+              <button
+                onClick={onOpenCaseModal}
+                className="w-full py-2 px-2.5 rounded-lg border border-dashed border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/15 text-amber-300 text-xs font-semibold flex items-center justify-center space-x-1.5 transition-colors cursor-pointer"
+              >
+                <FolderLock className="w-3.5 h-3.5 text-amber-400" />
+                <span>Select / Open Case</span>
+              </button>
+            )}
           </div>
         ) : (
           <button
             onClick={onOpenCaseModal}
-            className="w-10 h-10 mx-auto flex items-center justify-center rounded-lg bg-slate-900 border border-slate-800 text-cyan-400 hover:bg-slate-800 cursor-pointer"
-            title={`Active: ${activeCase?.case_name || 'Case'}`}
+            className={`w-10 h-10 mx-auto flex items-center justify-center rounded-lg border cursor-pointer transition-colors ${
+              activeCase
+                ? 'bg-slate-900 border-slate-800 text-cyan-400 hover:bg-slate-800'
+                : 'bg-amber-950/30 border-amber-700/50 text-amber-400 hover:bg-amber-900/40'
+            }`}
+            title={activeCase ? `Active: ${activeCase.case_name}` : 'No Case Selected - Click to Open Case'}
           >
             <FolderLock className="w-5 h-5" />
           </button>
@@ -221,7 +239,7 @@ export default function Sidebar({
                   <span className="text-[9px] font-mono text-cyan-300 font-bold bg-cyan-950/60 px-1.5 py-0.2 rounded border border-cyan-800/40 group-hover:border-cyan-500/60 transition">
                     {currentUser?.role?.value || currentUser?.role || 'Active Role'}
                   </span>
-                  {onOpenHistoryModal && (
+                  {onOpenHistoryModal && can(currentUser, 'AUDIT_VIEW') && (
                     <button
                       onClick={(e) => { e.stopPropagation(); onOpenHistoryModal(); }}
                       className="text-[9px] font-mono text-amber-400 hover:text-amber-300 flex items-center space-x-0.5 cursor-pointer underline decoration-amber-500/40"
@@ -244,13 +262,15 @@ export default function Sidebar({
           </div>
         ) : (
           <div className="flex flex-col items-center space-y-2">
-            <button
-              onClick={() => onOpenHistoryModal ? onOpenHistoryModal() : setActiveTab('audit')}
-              className="w-8 h-8 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center text-amber-400 hover:bg-slate-800 cursor-pointer"
-              title="Check Previous Investigation Records"
-            >
-              <History className="w-4 h-4" />
-            </button>
+            {can(currentUser, 'AUDIT_VIEW') && (
+              <button
+                onClick={() => onOpenHistoryModal ? onOpenHistoryModal() : setActiveTab('audit')}
+                className="w-8 h-8 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center text-amber-400 hover:bg-slate-800 cursor-pointer"
+                title="Check Previous Investigation Records"
+              >
+                <History className="w-4 h-4" />
+              </button>
+            )}
             <button
               onClick={() => setCollapsed(false)}
               className="p-1 rounded-md text-slate-500 hover:text-slate-300 hover:bg-slate-900 cursor-pointer"

@@ -115,6 +115,7 @@ class CaseCreateRequest(BaseModel):
     investigation_type: Optional[str] = "organized_crime"
     priority: Optional[str] = "High"
     created_by: Optional[str] = "Officer Vikram"
+    case_id: Optional[str] = None
 
 
 class CaseUpdateRequest(BaseModel):

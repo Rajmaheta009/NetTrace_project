@@ -16,6 +16,7 @@ import {
   PanelLeft,
   History
 } from 'lucide-react';
+import { can, isAdmin } from '../utils/permissions';
 
 export default function Navbar({
   activeTab, 
@@ -113,24 +114,26 @@ export default function Navbar({
             )}
 
             {/* History & Previous Records Navigation Pill */}
-            <button
-              onClick={() => {
-                if (onOpenHistoryModal) {
-                  onOpenHistoryModal();
-                } else if (setActiveTab) {
-                  setActiveTab('audit');
-                }
-              }}
-              className={`hidden sm:flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer group shadow-sm ${
-                activeTab === 'audit'
-                  ? 'bg-amber-500/20 border-amber-500/50 text-amber-200 shadow-sm shadow-amber-950/50'
-                  : 'bg-slate-900/90 hover:bg-slate-800/90 border-slate-800 text-slate-300 hover:text-amber-300'
-              }`}
-              title="Check Previous Records & Investigation History"
-            >
-              <History className="w-3.5 h-3.5 text-amber-400 group-hover:rotate-[-20deg] transition-transform" />
-              <span>History</span>
-            </button>
+            {can(currentUser, 'AUDIT_VIEW') && (
+              <button
+                onClick={() => {
+                  if (onOpenHistoryModal) {
+                    onOpenHistoryModal();
+                  } else if (setActiveTab) {
+                    setActiveTab('audit');
+                  }
+                }}
+                className={`hidden sm:flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer group shadow-sm ${
+                  activeTab === 'audit'
+                    ? 'bg-amber-500/20 border-amber-500/50 text-amber-200 shadow-sm shadow-amber-950/50'
+                    : 'bg-slate-900/90 hover:bg-slate-800/90 border-slate-800 text-slate-300 hover:text-amber-300'
+                }`}
+                title="Check Previous Records & Investigation History"
+              >
+                <History className="w-3.5 h-3.5 text-amber-400 group-hover:rotate-[-20deg] transition-transform" />
+                <span>History</span>
+              </button>
+            )}
           </div>
 
           {/* Center: Fast Spotlight Search Trigger (Ctrl+K) */}
@@ -162,40 +165,50 @@ export default function Navbar({
             </button>
 
             {/* Ingest Data CTA Button */}
-            <button
-              onClick={() => setActiveTab('ingest')}
-              className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl font-black text-xs transition-all shadow-md cursor-pointer ${
-                activeTab === 'ingest'
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white border border-emerald-400 shadow-emerald-500/30 ring-2 ring-emerald-400/40 scale-105'
-                  : 'bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white border border-cyan-300/60 shadow-lg shadow-cyan-500/25 hover:scale-105'
-              }`}
-              title="Click to insert or upload crime case data (CSV, JSON, Surveillance Reports)"
-            >
-              <UploadCloud className="w-4 h-4 text-white" />
-              <span>+ Insert Data</span>
-            </button>
+            {can(currentUser, 'EVIDENCE_UPLOAD') && (
+              <button
+                onClick={() => {
+                  if (!activeCase) {
+                    if (onOpenCaseModal) onOpenCaseModal();
+                  } else {
+                    setActiveTab('ingest');
+                  }
+                }}
+                className={`flex items-center space-x-1.5 px-3.5 py-1.5 rounded-xl font-black text-xs transition-all shadow-md cursor-pointer ${
+                  activeTab === 'ingest'
+                    ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-white border border-emerald-400 shadow-emerald-500/30 ring-2 ring-emerald-400/40 scale-105'
+                    : 'bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white border border-cyan-300/60 shadow-lg shadow-cyan-500/25 hover:scale-105'
+                }`}
+                title={activeCase ? "Click to insert or upload crime case data (CSV, JSON, Surveillance Reports)" : "Select a case first to insert data"}
+              >
+                <UploadCloud className="w-4 h-4 text-white" />
+                <span>+ Insert Data</span>
+              </button>
+            )}
 
             {/* Reset / Clear Memory Button */}
-            <button
-              onClick={() => setShowResetConfirm(true)}
-              disabled={loading || ((stats?.nodes || 0) === 0 && (stats?.edges || 0) === 0)}
-              title={((stats?.nodes || 0) > 0 || (stats?.edges || 0) > 0) ? "Wipe all graph data from memory and empty the diagram completely" : "No data inserted yet (Reset disabled)"}
-              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-all ${
-                ((stats?.nodes || 0) === 0 && (stats?.edges || 0) === 0)
-                  ? 'bg-transparent border border-slate-800/40 text-slate-600 opacity-20 cursor-not-allowed pointer-events-none shadow-none'
-                  : 'bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 hover:text-rose-200 shadow-md cursor-pointer hover:scale-105'
-              }`}
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Reset</span>
-            </button>
+            {(can(currentUser, 'GRAPH_CLEAR') || isAdmin(currentUser)) && (
+              <button
+                onClick={() => setShowResetConfirm(true)}
+                disabled={loading || !activeCase || ((stats?.nodes || 0) === 0 && (stats?.edges || 0) === 0)}
+                title={!activeCase ? "No active case selected" : ((stats?.nodes || 0) > 0 || (stats?.edges || 0) > 0) ? "Wipe all graph data from memory and empty the diagram completely" : "No data inserted yet (Reset disabled)"}
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-all ${
+                  (!activeCase || ((stats?.nodes || 0) === 0 && (stats?.edges || 0) === 0))
+                    ? 'bg-transparent border border-slate-800/40 text-slate-600 opacity-20 cursor-not-allowed pointer-events-none shadow-none'
+                    : 'bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 hover:text-rose-200 shadow-md cursor-pointer hover:scale-105'
+                }`}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Reset</span>
+              </button>
+            )}
 
             {/* Load Sample Demo Case */}
-            {onLoadDemo && (
+            {(can(currentUser, 'EVIDENCE_UPLOAD') || isAdmin(currentUser)) && onLoadDemo && (
               <button
                 onClick={onLoadDemo}
-                disabled={loading}
-                title="Load sample crime syndicate case for demonstration"
+                disabled={loading || !activeCase}
+                title={!activeCase ? "Select a case first to load demo data" : "Load sample crime syndicate case for demonstration"}
                 className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800/90 border border-slate-700 text-slate-300 hover:text-white transition-all font-bold text-xs shadow-md disabled:opacity-50 cursor-pointer"
               >
                 <PlayCircle className="w-3.5 h-3.5 text-cyan-400" />

@@ -16,12 +16,14 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { fetchValidationRecords, reviewValidationRecord, mergeEntities } from '../services/api';
+import { can } from '../utils/permissions';
 
 export default function ValidationCenter({ 
   activeCase, 
   graphData = { nodes: [], links: [] },
   onReviewCompleted,
-  onDeepInspect = null
+  onDeepInspect = null,
+  currentUser = null
 }) {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -271,20 +273,22 @@ export default function ValidationCenter({
 
                   {/* Resolution Actions: [ MERGE ], [ KEEP SEPARATE ], [ REVIEW ] */}
                   <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                    <div className="flex items-center space-x-2">
-                      <button
-                        onClick={() => handleMerge(dup.entityB.id, dup.entityA.id, dup.reason)}
-                        className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition cursor-pointer"
-                      >
-                        Merge B into A ({dup.entityA.name})
-                      </button>
-                      <button
-                        onClick={() => handleMerge(dup.entityA.id, dup.entityB.id, dup.reason)}
-                        className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition cursor-pointer"
-                      >
-                        Merge A into B ({dup.entityB.name})
-                      </button>
-                    </div>
+                    {can(currentUser, 'ENTITY_MERGE') && (
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={() => handleMerge(dup.entityB.id, dup.entityA.id, dup.reason)}
+                          className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition cursor-pointer"
+                        >
+                          Merge B into A ({dup.entityA.name})
+                        </button>
+                        <button
+                          onClick={() => handleMerge(dup.entityA.id, dup.entityB.id, dup.reason)}
+                          className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold transition cursor-pointer"
+                        >
+                          Merge A into B ({dup.entityB.name})
+                        </button>
+                      </div>
+                    )}
 
                     <div className="flex items-center space-x-2">
                       {onDeepInspect && (
@@ -356,24 +360,30 @@ export default function ValidationCenter({
 
                 {r.status === 'Needs Review' && (
                   <div className="flex items-center justify-end space-x-2 pt-1">
-                    <button
-                      onClick={() => handleAction(r.record_id, 'accept')}
-                      className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold transition cursor-pointer"
-                    >
-                      Accept
-                    </button>
-                    <button
-                      onClick={() => handleOpenCorrect(r)}
-                      className="px-3 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold transition cursor-pointer"
-                    >
-                      Correct & Accept
-                    </button>
-                    <button
-                      onClick={() => handleAction(r.record_id, 'reject')}
-                      className="px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold transition cursor-pointer"
-                    >
-                      Reject
-                    </button>
+                    {can(currentUser, 'VALIDATION_ACCEPT') && (
+                      <button
+                        onClick={() => handleAction(r.record_id, 'accept')}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-bold transition cursor-pointer"
+                      >
+                        Accept
+                      </button>
+                    )}
+                    {can(currentUser, 'VALIDATION_CORRECT') && (
+                      <button
+                        onClick={() => handleOpenCorrect(r)}
+                        className="px-3 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold transition cursor-pointer"
+                      >
+                        Correct & Accept
+                      </button>
+                    )}
+                    {can(currentUser, 'VALIDATION_REJECT') && (
+                      <button
+                        onClick={() => handleAction(r.record_id, 'reject')}
+                        className="px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold transition cursor-pointer"
+                      >
+                        Reject
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

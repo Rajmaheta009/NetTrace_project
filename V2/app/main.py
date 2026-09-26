@@ -192,6 +192,17 @@ async def add_security_headers_and_rate_limit(request: Request, call_next):
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
+    if exc.status_code == status.HTTP_403_FORBIDDEN:
+        msg = exc.detail if isinstance(exc.detail, str) else "You do not have permission to perform this action."
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={
+                "success": False,
+                "message": msg,
+                "detail": msg,
+            },
+            headers=getattr(exc, "headers", None) or {},
+        )
     return JSONResponse(
         status_code=exc.status_code,
         content={"detail": exc.detail},
@@ -1030,22 +1041,132 @@ def remove_user_from_case(
 # Case Management Endpoints
 # -------------------------------------------------------------
 
+def check_case_authorization(case_id: str, current_user: AuthenticatedUser) -> CaseStore:
+    """Verifies that the target case exists and that current_user is assigned to it or has admin/view_all rights."""
+    case = case_manager.get_case(case_id)
+    if not case:
+        raise HTTPException(status_code=404, detail=f"Case '{case_id}' not found.")
+    if not (current_user.is_admin or current_user.has_permission("CASE_VIEW_ALL")):
+        db = SessionLocal()
+        try:
+            assignment = db.query(CaseUserDB).filter(
+                CaseUserDB.case_id == case_id,
+                CaseUserDB.user_id == current_user.user_id,
+            ).first()
+            if not assignment:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Access Denied: You are not assigned to case '{case_id}'.",
+                )
+        finally:
+            db.close()
+    return case
+
+
+def resolve_target_case(explicit_case_id: Optional[str], current_user: AuthenticatedUser) -> CaseStore:
+    """Resolves target case file with user assignment fallback when case_id is omitted."""
+    target_case_id = explicit_case_id
+    if not target_case_id:
+        if current_user.is_admin or current_user.has_permission("CASE_VIEW_ALL"):
+            target_case_id = case_manager.active_case_id
+        else:
+            db = SessionLocal()
+            try:
+                assignment = db.query(CaseUserDB).filter(
+                    CaseUserDB.case_id == case_manager.active_case_id,
+                    CaseUserDB.user_id == current_user.user_id,
+                ).first()
+                if assignment:
+                    target_case_id = case_manager.active_case_id
+                else:
+                    first_assigned = db.query(CaseUserDB.case_id).filter(
+                        CaseUserDB.user_id == current_user.user_id
+                    ).first()
+                    if first_assigned:
+                        target_case_id = first_assigned[0]
+                    else:
+                        target_case_id = case_manager.active_case_id
+            finally:
+                db.close()
+    return check_case_authorization(target_case_id, current_user)
+
+
 @app.get("/api/cases", response_model=List[Case])
-def list_cases(current_user: AuthenticatedUser = Depends(get_current_user)):
-    """List all registered cases with their operational metrics, enforcing case-level authorization."""
+def list_cases(
+    search: Optional[str] = Query(None, description="Search case name, description, ID, or crime profile"),
+    status: Optional[str] = Query(None, description="Filter by status (Open, Under Review, Under Investigation, Closed, Archived)"),
+    investigation_type: Optional[str] = Query(None, description="Filter by investigation profile"),
+    priority: Optional[str] = Query(None, description="Filter by priority (Critical, High, Medium, Low)"),
+    sort_by: Optional[str] = Query("updated_at", description="Sort by field: updated_at, created_at, case_name, priority"),
+    sort_order: Optional[str] = Query("desc", description="Sort order: asc or desc"),
+    current_user: AuthenticatedUser = Depends(get_current_user),
+):
+    """List all registered cases with their operational metrics, enforcing case-level authorization and multi-factor filtering."""
     all_cases = case_manager.list_cases()
     if current_user.is_admin or current_user.has_permission("CASE_VIEW_ALL"):
-        return all_cases
-    db = SessionLocal()
-    try:
-        assigned_case_ids = {
-            cu.case_id for cu in db.query(CaseUserDB.case_id).filter(
-                CaseUserDB.user_id == current_user.user_id
-            ).all()
-        }
-        return [c for c in all_cases if c.case_id in assigned_case_ids]
-    finally:
-        db.close()
+        candidate_cases = all_cases
+    else:
+        db = SessionLocal()
+        try:
+            assigned_case_ids = {
+                cu.case_id for cu in db.query(CaseUserDB.case_id).filter(
+                    CaseUserDB.user_id == current_user.user_id
+                ).all()
+            }
+            candidate_cases = [c for c in all_cases if c.case_id in assigned_case_ids]
+        finally:
+            db.close()
+
+    # Apply search filter
+    if search and search.strip():
+        q = search.strip().lower()
+        candidate_cases = [
+            c for c in candidate_cases
+            if q in c.case_name.lower()
+            or q in c.case_id.lower()
+            or q in (c.description or "").lower()
+            or q in (c.investigation_type or "").lower()
+        ]
+
+    # Apply status filter
+    if status and status.strip():
+        s = status.strip().lower()
+        candidate_cases = [
+            c for c in candidate_cases
+            if (c.status.value.lower() if hasattr(c.status, "value") else str(c.status).lower()) == s
+        ]
+
+    # Apply investigation_type filter
+    if investigation_type and investigation_type.strip():
+        it = investigation_type.strip().lower()
+        candidate_cases = [
+            c for c in candidate_cases
+            if (c.investigation_type or "").lower() == it
+        ]
+
+    # Apply priority filter
+    if priority and priority.strip():
+        p = priority.strip().lower()
+        candidate_cases = [
+            c for c in candidate_cases
+            if (c.priority or "").lower() == p
+        ]
+
+    # Apply sorting
+    reverse = (sort_order or "desc").lower() == "desc"
+    sb = (sort_by or "updated_at").lower()
+    if sb == "case_name":
+        candidate_cases.sort(key=lambda c: (c.case_name or "").lower(), reverse=reverse)
+    elif sb == "created_at":
+        candidate_cases.sort(key=lambda c: c.created_at or "", reverse=reverse)
+    elif sb == "priority":
+        prio_map = {"critical": 4, "high": 3, "medium": 2, "low": 1}
+        candidate_cases.sort(key=lambda c: prio_map.get((c.priority or "").lower(), 0), reverse=reverse)
+    else:
+        # Default sort by updated_at or created_at
+        candidate_cases.sort(key=lambda c: c.updated_at or c.created_at or "", reverse=reverse)
+
+    return candidate_cases
 
 
 @app.post("/api/cases", response_model=Case)
@@ -1054,12 +1175,16 @@ def create_case(
     current_user: AuthenticatedUser = Depends(require_role(UserRole.INVESTIGATOR, UserRole.ADMIN)),
 ):
     """Create a new isolated case file (Investigator / Admin only)."""
+    if not req.case_name or not req.case_name.strip():
+        raise HTTPException(status_code=400, detail="Case Name is required.")
+
     case = case_manager.create_case(
-        case_name=req.case_name,
+        case_name=req.case_name.strip(),
         description=req.description or "",
         investigation_type=req.investigation_type or "organized_crime",
         priority=req.priority or "High",
         created_by=req.created_by or current_user.name,
+        case_id=req.case_id if hasattr(req, "case_id") and req.case_id else None,
     )
     # Automatically assign creator as CASE_OWNER
     db = SessionLocal()
@@ -1092,31 +1217,40 @@ def create_case(
 @app.get("/api/cases/active/current", response_model=Case)
 @app.get("/api/cases/active", response_model=Case)
 def get_active_case_info(current_user: AuthenticatedUser = Depends(get_current_user)):
-    """Return operational summary for the currently active case."""
-    return case_manager.get_active_case().get_summary_model()
+    """Return operational summary for the currently active case, verifying authorization."""
+    active_case = case_manager.get_active_case()
+    if current_user.is_admin or current_user.has_permission("CASE_VIEW_ALL"):
+        return active_case.get_summary_model()
+
+    db = SessionLocal()
+    try:
+        assignment = db.query(CaseUserDB).filter(
+            CaseUserDB.case_id == active_case.case_id,
+            CaseUserDB.user_id == current_user.user_id,
+        ).first()
+        if assignment:
+            return active_case.get_summary_model()
+
+        # If user is not assigned to the global active case, locate their first assigned case
+        first_assigned = db.query(CaseUserDB.case_id).filter(
+            CaseUserDB.user_id == current_user.user_id
+        ).first()
+        if first_assigned:
+            user_case = case_manager.get_case(first_assigned[0])
+            if user_case:
+                return user_case.get_summary_model()
+
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active or assigned case found for user. Please create or request access to a case.",
+        )
+    finally:
+        db.close()
 
 
 @app.get("/api/cases/{case_id}", response_model=Case)
 def get_case(case_id: str, current_user: AuthenticatedUser = Depends(get_current_user)):
-    case = case_manager.get_case(case_id)
-    if not case:
-        raise HTTPException(status_code=404, detail="Case not found")
-
-    if not (current_user.is_admin or current_user.has_permission("CASE_VIEW_ALL")):
-        db = SessionLocal()
-        try:
-            assignment = db.query(CaseUserDB).filter(
-                CaseUserDB.case_id == case_id,
-                CaseUserDB.user_id == current_user.user_id,
-            ).first()
-            if not assignment:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"Access Denied: You are not assigned to case '{case_id}'.",
-                )
-        finally:
-            db.close()
-
+    case = check_case_authorization(case_id, current_user)
     return case.get_summary_model()
 
 
@@ -1422,18 +1556,20 @@ def import_data(
 ):
     """
     Import CSV, JSON, or unstructured text into a specified or active case.
-    Validates case status and tags all entities and relationships with case and evidence provenance.
+    Validates case status, assignment, and tags all entities and relationships with case and evidence provenance.
     """
     if not request.content or not request.content.strip():
         raise HTTPException(status_code=400, detail="content must not be empty")
+
+    target_case = resolve_target_case(request.case_id, current_user)
+
     try:
         res = run_import(request)
-        target_case_id = request.case_id or case_manager.active_case_id
         record_audit(
             actor_name=current_user.name,
             action="import_data",
-            details=f"Ingested {res.imported_entities} entities, {res.imported_relationships} rels into case {target_case_id} ({res.detected_input_type})",
-            case_id=target_case_id,
+            details=f"Ingested {res.imported_entities} entities, {res.imported_relationships} rels into case {target_case.case_id} ({res.detected_input_type})",
+            case_id=target_case.case_id,
             resource_id=res.evidence_id,
             actor_id=current_user.user_id,
             actor_role=current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role),
@@ -1451,6 +1587,8 @@ async def import_file(
     current_user: UserProfile = Depends(require_role(UserRole.INVESTIGATOR, UserRole.ADMIN)),
 ):
     """Import an uploaded file via multipart/form-data into the target or active case."""
+    target_case = resolve_target_case(case_id, current_user)
+
     raw_bytes = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(raw_bytes) > MAX_UPLOAD_BYTES:
         raise HTTPException(
@@ -1489,15 +1627,14 @@ async def import_file(
     clean_name = Path(raw_label).name
     clean_name = re.sub(r'[^\w\-_\.]', '_', clean_name)
     label = clean_name or "uploaded_file"
-    request = ImportRequest(type=None, content=text, source_label=label, case_id=case_id)
+    request = ImportRequest(type=None, content=text, source_label=label, case_id=target_case.case_id)
     try:
         res = run_import(request)
-        target_case_id = case_id or case_manager.active_case_id
         record_audit(
             actor_name=current_user.name,
             action="import_file",
-            details=f"Ingested file '{label}' into case {target_case_id} (entities={res.imported_entities}, rels={res.imported_relationships})",
-            case_id=target_case_id,
+            details=f"Ingested file '{label}' into case {target_case.case_id} (entities={res.imported_entities}, rels={res.imported_relationships})",
+            case_id=target_case.case_id,
             resource_id=res.evidence_id,
             actor_id=current_user.user_id,
             actor_role=current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role),
