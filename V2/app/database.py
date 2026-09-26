@@ -19,6 +19,7 @@ from sqlalchemy import (
     Column,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Table,
@@ -256,6 +257,8 @@ class EntityDB(Base):
 
     __table_args__ = (
         UniqueConstraint("case_id", "entity_id", name="uq_case_entity"),
+        Index("ix_entity_case_entity_id", "case_id", "entity_id"),
+        Index("ix_entity_case_type", "case_id", "type"),
     )
 
 
@@ -308,6 +311,9 @@ class RelationshipDB(Base):
 
     __table_args__ = (
         UniqueConstraint("case_id", "rel_id", name="uq_case_rel"),
+        Index("ix_rel_case_source", "case_id", "source_id"),
+        Index("ix_rel_case_target", "case_id", "target_id"),
+        Index("ix_rel_case_endpoints", "case_id", "source_id", "target_id"),
     )
 
 
@@ -486,6 +492,14 @@ class AuditLogDB(Base):
     metadata_json = Column(Text, default="{}")
     previous_hash = Column(String(128), default="0" * 64)
     current_hash = Column(String(128), nullable=False)
+    ip_address = Column(String(64), nullable=True)
+    user_agent = Column(String(256), nullable=True)
+
+    __table_args__ = (
+        Index("ix_audit_user_timestamp", "user_id", "timestamp"),
+        Index("ix_audit_case_timestamp", "case_id", "timestamp"),
+        Index("ix_audit_action_status", "action", "result"),
+    )
 
 
 class AuditIntegrityDB(Base):
@@ -505,5 +519,11 @@ class AuditIntegrityDB(Base):
 # -------------------------------------------------------------
 
 def init_db_and_seed():
-    """Initializes tables using SQLAlchemy metadata."""
+    """Initializes tables using SQLAlchemy metadata and ensures column compatibility."""
     Base.metadata.create_all(bind=engine)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS ip_address VARCHAR(64);"))
+            conn.execute(text("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS user_agent VARCHAR(256);"))
+    except Exception as exc:
+        logger.debug(f"Schema compatibility notice: {exc}")

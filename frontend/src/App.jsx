@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, laz
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import ViewLoadingSkeleton from './components/ViewLoadingSkeleton';
-import { ShieldAlert, FolderLock } from 'lucide-react';
+import { ShieldAlert, FolderLock, X } from 'lucide-react';
 
 // =============================================================
 // LAZY-LOADED CORE & FORENSIC VIEWS (Code Splitting / Decoupled Chunks)
@@ -129,6 +129,19 @@ export default function App() {
   // Investigation Case & Context Hydration Status
   const [caseLoadStatus, setCaseLoadStatus] = useState('idle'); // 'idle' | 'loading' | 'success' | 'unauthorized' | 'not_found' | 'error'
   const [caseLoadError, setCaseLoadError] = useState(null);
+  const [sessionExpiredNotice, setSessionExpiredNotice] = useState(null);
+
+  // Global Session Expiration Listener
+  useEffect(() => {
+    const handleSessionExpired = (e) => {
+      const msg = e?.detail?.message || 'Your session has expired. Please log in again to continue.';
+      setSessionExpiredNotice(msg);
+      setCurrentUser(null);
+      setIsRoleModalOpen(true);
+    };
+    window.addEventListener('nettrace:session-expired', handleSessionExpired);
+    return () => window.removeEventListener('nettrace:session-expired', handleSessionExpired);
+  }, []);
 
   /**
    * loadActiveCaseAndContext
@@ -531,6 +544,36 @@ export default function App() {
         <main className="flex-1 overflow-y-auto p-3 sm:p-5 lg:p-6">
           <div className="max-w-7xl mx-auto">
 
+            {/* Session Expiration Global Alert Banner */}
+            {sessionExpiredNotice && (
+              <div className="mb-6 p-4 bg-amber-500/15 border border-amber-500/40 rounded-2xl flex items-center justify-between text-xs text-amber-200 shadow-xl animate-in fade-in">
+                <div className="flex items-center space-x-3">
+                  <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0" />
+                  <div>
+                    <p className="font-bold text-amber-100">Session Expired</p>
+                    <p className="text-amber-300/80">{sessionExpiredNotice}</p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => {
+                      setIsRoleModalOpen(true);
+                      setSessionExpiredNotice(null);
+                    }}
+                    className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold transition cursor-pointer"
+                  >
+                    Log In Again
+                  </button>
+                  <button
+                    onClick={() => setSessionExpiredNotice(null)}
+                    className="p-1.5 text-slate-400 hover:text-white"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Case Authorization Alert Banner */}
             {caseLoadStatus === 'unauthorized' && (
               <div className="mb-6 p-4 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-center justify-between text-xs text-rose-300 shadow-lg animate-in fade-in">
@@ -592,6 +635,7 @@ export default function App() {
               {activeTab === 'graph' && (
                 <GraphView
                   graphData={graphData}
+                  activeCase={activeCase}
                   selectedEntityId={selectedEntityId}
                   onSelectEntity={handleSelectEntity}
                   isDrawerOpen={isDrawerOpen}

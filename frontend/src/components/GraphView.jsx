@@ -29,9 +29,12 @@ import {
   ChevronUp,
   ChevronDown,
   FileText,
+  Layers,
+  Loader2,
+  ZoomIn,
 } from 'lucide-react';
 import { getEntityColor, RELATION_LABELS } from '../utils/colors';
-import { logAuditAction } from '../services/api';
+import { logAuditAction, fetchGraphNeighborhood } from '../services/api';
 import { inferCrimeFallback, getSeverityStyle } from '../utils/crimeInference';
 
 // Helper to draw clean rounded rectangles on 2D canvas with cross-browser support
@@ -54,6 +57,7 @@ function drawRoundedPill(ctx, x, y, width, height, radius) {
 
 export default function GraphView({ 
   graphData, 
+  activeCase = null,
   selectedEntityId, 
   onSelectEntity, 
   isDrawerOpen = false,
@@ -77,6 +81,13 @@ export default function GraphView({
   const [inspectedRelationship, setInspectedRelationship] = useState(null);
   const [showCommunityHalos, setShowCommunityHalos] = useState(true);
   const [filterByCrimeProfile, setFilterByCrimeProfile] = useState(false);
+
+  // Lazy Neighborhood Orbit Mode state
+  const [lazyMode, setLazyMode] = useState(true);
+  const [neighborhoodDepth, setNeighborhoodDepth] = useState(1);
+  const [neighborhoodData, setNeighborhoodData] = useState(null);
+  const [isExpanding, setIsExpanding] = useState(false);
+  const [focalEntityId, setFocalEntityId] = useState(null);
 
   // Custom dragged/pinned 3D node coordinates: { [nodeId]: { x, y, z } }
   const [customPositions, setCustomPositions] = useState({});
@@ -109,8 +120,48 @@ export default function GraphView({
   const dragStartPosRef = useRef({ x: 0, y: 0 });
   const pulsePhaseRef = useRef(0);
 
-  const nodes = graphData?.nodes || [];
-  const links = graphData?.links || [];
+  // Effective Nodes & Links (Neighborhood Orbit vs Full Network)
+  const effectiveGraphData = (lazyMode && neighborhoodData) ? neighborhoodData : graphData;
+  const nodes = effectiveGraphData?.nodes || [];
+  const links = effectiveGraphData?.links || [];
+
+  // Function to load neighborhood from backend
+  const loadNeighborhood = useCallback(async (targetEntityId = null, depth = neighborhoodDepth) => {
+    if (!lazyMode) return;
+    setIsExpanding(true);
+    try {
+      const targetId = targetEntityId || focalEntityId || selectedEntityId || null;
+      const res = await fetchGraphNeighborhood(targetId, depth, activeCase?.case_id, 80);
+      setNeighborhoodData(res);
+      if (res?.focal_entity_id) {
+        setFocalEntityId(res.focal_entity_id);
+      }
+    } catch (err) {
+      console.warn('Neighborhood lazy fetch error, falling back to full graph:', err);
+    } finally {
+      setIsExpanding(false);
+    }
+  }, [lazyMode, neighborhoodDepth, focalEntityId, selectedEntityId, activeCase?.case_id]);
+
+  // Load neighborhood on mount or when case/depth/lazyMode changes
+  useEffect(() => {
+    if (lazyMode) {
+      loadNeighborhood(selectedEntityId, neighborhoodDepth);
+    } else {
+      setNeighborhoodData(null);
+    }
+  }, [lazyMode, neighborhoodDepth, activeCase?.case_id]);
+
+  // Handle progressive expansion selection
+  const handleSelectAndExpand = useCallback((entityId, shouldOpenDrawer = false) => {
+    onSelectEntity(entityId, shouldOpenDrawer);
+    if (entityId) {
+      setFocalEntityId(entityId);
+      if (lazyMode) {
+        loadNeighborhood(entityId, neighborhoodDepth);
+      }
+    }
+  }, [onSelectEntity, lazyMode, neighborhoodDepth, loadNeighborhood]);
 
   // ---------------------------------------------------------
   // Compute 1-Hop Connected Neighborhood for the Selected Node
@@ -217,18 +268,53 @@ export default function GraphView({
   }, [nodes]);
 
   // ---------------------------------------------------------
-  // Base 3D Spherical Coordinates (Fibonacci Sphere)
+  // Base 3D Spherical Coordinates (Fibonacci Sphere + Focal Center)
   // ---------------------------------------------------------
   const baseNodePositions3D = useMemo(() => {
     if (!nodes.length) return {};
     const pos = {};
+    const focalId = focalEntityId || selectedEntityId;
+    const isLazyFocal = lazyMode && focalId && nodes.some(n => n.id === focalId);
+
+    if (isLazyFocal) {
+      // Position focal entity right at the strategic center (0, 0, 0)
+      pos[focalId] = { x: 0, y: 0, z: 0 };
+      
+      const otherNodes = nodes.filter(n => n.id !== focalId);
+      const count = otherNodes.length;
+      const baseRadius = 220;
+      const phi = Math.PI * (3 - Math.sqrt(5));
+
+      otherNodes.forEach((node, i) => {
+        const y = 1 - (i / Math.max(count - 1, 1)) * 2;
+        const radiusAtY = Math.sqrt(Math.max(0, 1 - y * y));
+        const theta = phi * i;
+
+        // Depth distance: direct neighbors closer, 2+ hops further out
+        const isDirectNeighbor = links.some(l => {
+          const s = typeof l.source === 'object' && l.source !== null ? l.source.id : l.source;
+          const t = typeof l.target === 'object' && l.target !== null ? l.target.id : l.target;
+          return (s === focalId && t === node.id) || (t === focalId && s === node.id);
+        });
+
+        const r = isDirectNeighbor ? baseRadius * 0.75 : baseRadius * 1.18;
+
+        pos[node.id] = {
+          x: Math.cos(theta) * radiusAtY * r,
+          y: y * r,
+          z: Math.sin(theta) * radiusAtY * r,
+        };
+      });
+      return pos;
+    }
+
     const count = nodes.length;
     const baseRadius = 240;
 
     const phi = Math.PI * (3 - Math.sqrt(5));
     nodes.forEach((node, i) => {
       const y = 1 - (i / Math.max(count - 1, 1)) * 2;
-      const radiusAtY = Math.sqrt(1 - y * y);
+      const radiusAtY = Math.sqrt(Math.max(0, 1 - y * y));
       const theta = phi * i;
 
       const betweenness = node.centrality?.betweenness || 0;
@@ -241,7 +327,7 @@ export default function GraphView({
       };
     });
     return pos;
-  }, [nodes]);
+  }, [nodes, links, lazyMode, focalEntityId, selectedEntityId]);
 
   // ---------------------------------------------------------
   // Effective 3D Positions (Merges Base + User Dragged Positions)
@@ -293,15 +379,9 @@ export default function GraphView({
   const handleLocateKingpin = () => {
     if (!nodes.length) return;
     const topPerson = mainCriminals[0];
-    if (topPerson) {
-      onSelectEntity(topPerson.id, false);
-      setRightHudTab('selected');
-      setIsRightHudOpen(true);
-      return;
-    }
-    const topNode = [...nodes].sort((a, b) => (b.centrality?.betweenness || 0) - (a.centrality?.betweenness || 0))[0];
-    if (topNode) {
-      onSelectEntity(topNode.id, false);
+    const targetNode = topPerson || [...nodes].sort((a, b) => (b.centrality?.betweenness || 0) - (a.centrality?.betweenness || 0))[0];
+    if (targetNode) {
+      handleSelectAndExpand(targetNode.id, false);
       setRightHudTab('selected');
       setIsRightHudOpen(true);
     }
@@ -984,6 +1064,11 @@ export default function GraphView({
         const movedNode = nodes.find(n => n.id === draggedNodeIdRef.current);
         const nodeName = movedNode?.name || draggedNodeIdRef.current;
         logAuditAction('drag node', `Repositioned node "${nodeName}" in 3D network space`);
+      } else if (!hasMovedRef.current && draggedNodeIdRef.current) {
+        // Single click without dragging: focus suspect and expand neighborhood in lazy mode!
+        const clickedId = draggedNodeIdRef.current;
+        handleSelectAndExpand(clickedId, false);
+        setRightHudTab('selected');
       }
     }
 
@@ -1006,7 +1091,7 @@ export default function GraphView({
 
     const hit = findNodeAtScreen(mx, my);
     if (hit) {
-      onSelectEntity(hit.id);
+      handleSelectAndExpand(hit.id, true);
       logAuditAction('double_click node info', `Inspected full dossier for "${hit.name}" (${hit.type})`);
     }
   };
@@ -1110,6 +1195,63 @@ export default function GraphView({
             <Globe className="w-3.5 h-3.5 text-cyan-400 animate-spin-slow" />
             <span>3D Tactical Orbit</span>
           </div>
+
+          {/* Lazy Mode Toggle */}
+          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px] font-mono">
+            <button
+              onClick={() => {
+                setLazyMode(true);
+                loadNeighborhood(selectedEntityId || focalEntityId, neighborhoodDepth);
+              }}
+              className={`flex items-center space-x-1 px-2.5 py-0.5 rounded-lg transition font-bold cursor-pointer ${
+                lazyMode
+                  ? 'bg-cyan-500/25 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Progressive Lazy Orbit: load focal suspect & depth connections"
+            >
+              <Layers className="w-3 h-3 text-cyan-400" />
+              <span>Neighborhood</span>
+            </button>
+            <button
+              onClick={() => setLazyMode(false)}
+              className={`flex items-center space-x-1 px-2.5 py-0.5 rounded-lg transition font-bold cursor-pointer ${
+                !lazyMode
+                  ? 'bg-cyan-500/25 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Render complete case network graph"
+            >
+              <Globe className="w-3 h-3 text-slate-400" />
+              <span>Full Graph</span>
+            </button>
+          </div>
+
+          {/* Progressive Depth Controls (When lazyMode is active) */}
+          {lazyMode && (
+            <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-[11px] font-mono">
+              <span className="text-[10px] text-slate-400 px-1.5 font-bold">DEPTH:</span>
+              {[1, 2, 3].map((d) => (
+                <button
+                  key={d}
+                  onClick={() => {
+                    setNeighborhoodDepth(d);
+                    loadNeighborhood(focalEntityId || selectedEntityId, d);
+                  }}
+                  disabled={isExpanding}
+                  className={`px-2 py-0.5 rounded-lg font-bold transition cursor-pointer ${
+                    neighborhoodDepth === d
+                      ? 'bg-sky-500/30 text-sky-200 border border-sky-400/50 shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                  }`}
+                  title={`Expand neighborhood up to ${d} hop(s)`}
+                >
+                  {d === 1 ? '1 (Direct)' : d === 2 ? '2 (Extended)' : '3 (Deep)'}
+                </button>
+              ))}
+              {isExpanding && <Loader2 className="w-3 h-3 text-cyan-400 animate-spin ml-1" />}
+            </div>
+          )}
 
           {/* Quick Insert Data Button directly inside 3D Canvas */}
           {onOpenIngest && (
@@ -1335,18 +1477,49 @@ export default function GraphView({
         
         {/* Hologram Reticle Overlays */}
         <div className="absolute top-4 left-4 pointer-events-none flex flex-col space-y-1 font-mono text-[10px] text-cyan-500/80 z-10">
-          <div className="flex items-center space-x-1">
+          <div className="flex items-center space-x-1.5">
             <Crosshair className="w-3.5 h-3.5 animate-spin-slow text-cyan-400" />
             <span>OPTICAL 3D SENSOR MATRIX</span>
+            {lazyMode && (
+              <span className="ml-2 px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-700/60 font-bold">
+                NEIGHBORHOOD DEPTH {neighborhoodDepth} ({nodes.length} nodes)
+              </span>
+            )}
           </div>
           <div className="text-slate-500">
             CAM_Z: {Math.round(cameraZ)} • ROT_Y: {rotY.toFixed(2)} • ROT_X: {rotX.toFixed(2)}
+            {lazyMode && neighborhoodData?.total_case_nodes && (
+              <span> • Case Total: {neighborhoodData.total_case_nodes} nodes, {neighborhoodData.total_case_edges} edges</span>
+            )}
           </div>
           <div className="text-cyan-400/90 font-sans flex items-center space-x-1 mt-1">
             <Move className="w-3 h-3 text-cyan-400" />
-            <span>Click & hold any node to drag • Relations stay attached</span>
+            <span>Click node to expand • Double-click for dossier • Drag to reposition</span>
           </div>
         </div>
+
+        {/* Quick Expand Depth Badge when in Lazy Mode and more hops available */}
+        {lazyMode && neighborhoodDepth < 3 && (
+          <div className="absolute top-4 right-4 z-10">
+            <button
+              onClick={() => {
+                const nextDepth = neighborhoodDepth + 1;
+                setNeighborhoodDepth(nextDepth);
+                loadNeighborhood(focalEntityId || selectedEntityId, nextDepth);
+              }}
+              disabled={isExpanding}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-sky-300 border border-sky-500/40 text-xs font-mono font-bold transition shadow-lg hover:scale-105 cursor-pointer backdrop-blur-md"
+              title={`Expand neighborhood from Depth ${neighborhoodDepth} to Depth ${neighborhoodDepth + 1}`}
+            >
+              {isExpanding ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-400" />
+              ) : (
+                <ZoomIn className="w-3.5 h-3.5 text-sky-400" />
+              )}
+              <span>+ Expand to Depth {neighborhoodDepth + 1}</span>
+            </button>
+          </div>
+        )}
 
         {/* 3D Orbit Canvas with Node Dragging Support */}
         <canvas
@@ -1554,7 +1727,7 @@ export default function GraphView({
                         <div
                           key={criminal.id}
                           onClick={() => {
-                            onSelectEntity(criminal.id, false);
+                            handleSelectAndExpand(criminal.id, false);
                             setRightHudTab('selected');
                           }}
                           className={`p-3 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between space-y-2 hover:scale-[1.01] ${
@@ -1665,7 +1838,7 @@ export default function GraphView({
                     {/* Previous Suspect Quick Return Link */}
                     {previousCriminal && previousCriminal.id !== selectedNode.id && (
                       <button
-                        onClick={() => onSelectEntity(previousCriminal.id, false)}
+                        onClick={() => handleSelectAndExpand(previousCriminal.id, false)}
                         className="w-full flex items-center justify-between px-3 py-2 rounded-2xl bg-indigo-950/60 hover:bg-indigo-900/80 border border-indigo-500/40 text-xs text-indigo-200 transition shadow-sm cursor-pointer"
                         title={`Return to previous suspect: ${previousCriminal.name}`}
                       >
@@ -1747,7 +1920,7 @@ export default function GraphView({
                           {neighborObjects.map(nb => (
                             <button
                               key={nb.id}
-                              onClick={() => onSelectEntity(nb.id, false)}
+                              onClick={() => handleSelectAndExpand(nb.id, false)}
                               className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-cyan-500/20 text-slate-200 hover:text-cyan-200 border border-slate-800 hover:border-cyan-500/40 text-xs font-bold transition shadow-sm cursor-pointer"
                               title={`Click to focus on ${nb.name}`}
                             >

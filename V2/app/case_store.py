@@ -10,10 +10,11 @@ and deterministic NetworkX graph construction.
 import hashlib
 import json
 import uuid
+from collections import defaultdict
 from datetime import datetime
 from threading import Lock
 import logging
-from typing import Any, Dict, List, Optional, Tuple,Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import networkx as nx
 
@@ -995,6 +996,159 @@ class CaseStore:
                 )
 
         return GraphResponse(directed=True, multigraph=True, nodes=nodes, links=links)
+
+    def to_neighborhood_node_link(
+        self,
+        focal_entity_id: Optional[str] = None,
+        depth: int = 1,
+        max_nodes: int = 80,
+        centrality: Optional[Dict[str, Dict[str, float]]] = None,
+        community_map: Optional[Dict[str, str]] = None,
+    ) -> GraphResponse:
+        """
+        Extracts a localized graph neighborhood around a focal entity up to `depth` hops (depth = 1, 2, 3).
+        Avoids loading every entity in the case immediately, drastically improving rendering speed
+        and adhering to progressive graph exploration requirements.
+        """
+        if not self.entities:
+            return GraphResponse(
+                directed=True,
+                multigraph=True,
+                nodes=[],
+                links=[],
+                focal_entity_id=None,
+                depth=depth,
+                total_case_nodes=0,
+                total_case_edges=0,
+                has_more=False,
+            )
+
+        # 1. Determine focal entity
+        focal_id = None
+        if focal_entity_id and focal_entity_id in self.entities:
+            focal_id = focal_entity_id
+        else:
+            # Pick highest betweenness/degree entity if centrality provided, else first Person, else first entity
+            if centrality:
+                sorted_by_centrality = sorted(
+                    self.entities.keys(),
+                    key=lambda eid: centrality.get(eid, {}).get("betweenness", 0.0),
+                    reverse=True
+                )
+                focal_id = sorted_by_centrality[0] if sorted_by_centrality else None
+
+            if not focal_id:
+                for eid, ent in self.entities.items():
+                    if ent.type == EntityType.PERSON:
+                        focal_id = eid
+                        break
+            if not focal_id:
+                focal_id = next(iter(self.entities.keys()))
+
+        # 2. Build fast in-memory bidirectional adjacency map
+        adj: Dict[str, Set[str]] = defaultdict(set)
+        for r in self.relationships.values():
+            if r.source in self.entities and r.target in self.entities:
+                adj[r.source].add(r.target)
+                adj[r.target].add(r.source)
+
+        # 3. BFS traversal bounded by depth and max_nodes
+        depth = max(1, min(depth, 3))
+        visited: Set[str] = {focal_id}
+        current_level: Set[str] = {focal_id}
+
+        for _ in range(depth):
+            next_level: Set[str] = set()
+            for nid in current_level:
+                for neighbor in adj.get(nid, set()):
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        next_level.add(neighbor)
+                        if len(visited) >= max_nodes:
+                            break
+                if len(visited) >= max_nodes:
+                    break
+            current_level = next_level
+            if not current_level or len(visited) >= max_nodes:
+                break
+
+        # 4. Construct nodes for visited entities
+        nodes = []
+        for eid in visited:
+            e = self.entities[eid]
+            comm_id = (community_map or {}).get(e.id, e.community_id)
+            ev_count = max(1, len(e.source_refs))
+            cent_val = (centrality or {}).get(e.id, {"degree": 0.0, "betweenness": 0.0})
+            nodes.append(
+                GraphNodeOut(
+                    id=e.id,
+                    type=e.type,
+                    name=e.name,
+                    aliases=e.aliases,
+                    attributes=e.attributes,
+                    centrality=cent_val,
+                    source_refs=e.source_refs,
+                    community_id=comm_id,
+                    evidence_count=ev_count,
+                )
+            )
+
+        # 5. Construct links between visited entities
+        links = []
+        for r in self.relationships.values():
+            if r.source in visited and r.target in visited:
+                src_ent = self.entities[r.source]
+                tgt_ent = self.entities[r.target]
+                crime_info = infer_crime_for_relationship(
+                    relation_type=r.relation_type,
+                    source_entity=src_ent,
+                    target_entity=tgt_ent,
+                    evidence=r.evidence,
+                    attributes=r.attributes,
+                    case_profile=self.investigation_type or "organized_crime",
+                )
+                links.append(
+                    GraphLinkOut(
+                        source=r.source,
+                        target=r.target,
+                        relation_type=r.relation_type,
+                        weight=r.weight,
+                        evidence=r.evidence,
+                        event_id=r.event_id,
+                        attributes=r.attributes,
+                        confidence=r.confidence,
+                        confidence_label=r.confidence_label,
+                        confidence_reasons=r.confidence_reasons,
+                        evidence_id=r.evidence_id,
+                        source_file=r.source_file,
+                        source_record=r.source_record,
+                        validation_status=r.validation_status,
+                        occurrences=r.occurrences,
+                        suspected_crime=crime_info.get("suspected_crime"),
+                        crime_category=crime_info.get("crime_category"),
+                        legal_statutes=crime_info.get("legal_statutes", []),
+                        crime_severity=crime_info.get("crime_severity", "Moderate"),
+                        crime_rationale=crime_info.get("crime_rationale"),
+                        actionable_recommendations=crime_info.get("actionable_recommendations", []),
+                        indictment_readiness=crime_info.get("indictment_readiness", "Preliminary"),
+                        evidentiary_sufficiency=crime_info.get("indictment_readiness", "Preliminary"),
+                    )
+                )
+
+        total_nodes = len(self.entities)
+        total_edges = len(self.relationships)
+
+        return GraphResponse(
+            directed=True,
+            multigraph=True,
+            nodes=nodes,
+            links=links,
+            focal_entity_id=focal_id,
+            depth=depth,
+            total_case_nodes=total_nodes,
+            total_case_edges=total_edges,
+            has_more=(len(visited) < total_nodes),
+        )
 
 
 class CaseManager:

@@ -14,7 +14,7 @@ import hashlib
 import logging
 import os
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 import bcrypt
@@ -189,7 +189,7 @@ def create_access_token(
     **kwargs: Any,
 ) -> str:
     """Creates a short-lived signed JWT access token with flexible argument support."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     expire = now + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
 
     # Allow dict as first positional argument if passed as data
@@ -522,6 +522,16 @@ def require_role(*allowed_roles: Union[UserRole, str]) -> Callable:
         user_roles = {r.upper().replace(" ", "_") for r in current_user.roles}
         if not user_roles.intersection(allowed_set):
             allowed_names = ", ".join([str(r) for r in allowed_roles])
+            try:
+                from app.audit_logger import record_audit
+                record_audit(
+                    acting_user=current_user,
+                    action="permission_denied",
+                    details=f"Access Denied: Requires one of [{allowed_names}] role(s). User has roles {current_user.roles}",
+                    result="DENIED",
+                )
+            except Exception as e:
+                logger.warning(f"Failed to record audit for permission denial: {e}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access Denied: Requires one of [{allowed_names}] role(s)."
@@ -539,6 +549,16 @@ def require_permission(*required_perms: str) -> Callable:
     def permission_checker(current_user: AuthenticatedUser = Depends(get_current_user)) -> AuthenticatedUser:
         if not current_user.has_permission(*required_perms):
             perms_str = ", ".join(required_perms)
+            try:
+                from app.audit_logger import record_audit
+                record_audit(
+                    acting_user=current_user,
+                    action="permission_denied",
+                    details=f"Access Denied: Missing required permission [{perms_str}].",
+                    result="DENIED",
+                )
+            except Exception as e:
+                logger.warning(f"Failed to record audit for permission denial: {e}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access Denied: Missing required permission [{perms_str}]."

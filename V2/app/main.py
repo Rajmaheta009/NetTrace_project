@@ -18,7 +18,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.analytics import compute_centrality, ranked_entities
-from app.audit_logger import get_audit_trail, record_audit, verify_audit_integrity
+from app.audit_logger import (
+    get_audit_trail,
+    get_inspector_factual_indicators,
+    query_audit_activity,
+    record_audit,
+    verify_audit_integrity,
+)
 from app.auth import (
     AuthenticatedUser,
     DEFAULT_ROLE_PERMISSIONS,
@@ -334,6 +340,52 @@ def verify_audit_trail_integrity(
     return verify_audit_integrity()
 
 
+@app.get("/api/audit/activity")
+def get_audit_activity_paginated(
+    user_id: Optional[str] = Query(None, description="Filter by user / inspector ID"),
+    role: Optional[str] = Query(None, description="Filter by role"),
+    action: Optional[str] = Query(None, description="Filter by specific action"),
+    case_id: Optional[str] = Query(None, description="Filter by case ID"),
+    status: Optional[str] = Query(None, description="Filter by status (SUCCESS, FAILED, DENIED)"),
+    search: Optional[str] = Query(None, description="Search across officer, action, case, details"),
+    start_date: Optional[str] = Query(None, description="Start date/time (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date/time (YYYY-MM-DD)"),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(25, ge=5, le=200, description="Records per page"),
+    sort_order: str = Query("desc", description="Sort order: desc or asc"),
+    current_user: AuthenticatedUser = Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
+):
+    """
+    Super Admin endpoint to inspect activity by user/inspector with multi-factor filters,
+    search, and pagination.
+    """
+    return query_audit_activity(
+        user_id=user_id,
+        role=role,
+        action=action,
+        case_id=case_id,
+        status=status,
+        search=search,
+        start_date=start_date,
+        end_date=end_date,
+        page=page,
+        page_size=page_size,
+        sort_order=sort_order,
+    )
+
+
+@app.get("/api/audit/inspector-indicators")
+def get_inspector_indicators(
+    user_id: Optional[str] = Query(None, description="Optional user ID to filter indicators"),
+    current_user: AuthenticatedUser = Depends(require_role(UserRole.ADMIN, UserRole.SUPER_ADMIN)),
+):
+    """
+    Returns objective factual indicators (Failed Logins, Deletions, Exports, Permission Errors, Successful Ops)
+    for the Super Admin 'Is This User Doing Anything Wrong?' inspection view.
+    """
+    return get_inspector_factual_indicators(user_id=user_id)
+
+
 # -------------------------------------------------------------
 # Authentication Endpoints (JWT Access + Refresh Tokens)
 # -------------------------------------------------------------
@@ -405,6 +457,14 @@ def login(req: LoginRequest):
             (UserDB.username == req.username_or_email) | (UserDB.email == req.username_or_email)
         ).first()
         if not user or not verify_password(req.password, user.password_hash):
+            record_audit(
+                actor_name=req.username_or_email,
+                actor_id=user.id if user else "UNKNOWN",
+                actor_role=user.role if user else "ANONYMOUS",
+                action="login_failed",
+                details=f"Failed login attempt for identifier '{req.username_or_email}'",
+                result="FAILED",
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid username or password",
@@ -412,6 +472,14 @@ def login(req: LoginRequest):
             )
 
         if user.status in ("INACTIVE", "SUSPENDED"):
+            record_audit(
+                actor_name=user.full_name,
+                actor_id=user.id,
+                actor_role=user.role,
+                action="login_blocked",
+                details=f"Login attempt by {user.status} account '{user.username}'",
+                result="DENIED",
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Account is {user.status}. Please contact a NetTrace administrator.",
@@ -1453,6 +1521,35 @@ def get_graph(current_user: UserProfile = Depends(get_current_user)):
     return active_case.to_node_link(centrality, community_map=node_to_comm)
 
 
+@app.get("/api/graph/neighborhood", response_model=GraphResponse)
+def get_graph_neighborhood(
+    entity_id: Optional[str] = Query(None, description="Focal entity ID to center the neighborhood around"),
+    depth: int = Query(1, ge=1, le=3, description="Neighborhood hop depth (1=direct neighbors, 2=extended, 3=deep)"),
+    case_id: Optional[str] = Query(None, description="Target case ID"),
+    max_nodes: int = Query(80, ge=5, le=250, description="Max nodes to prevent UI overload"),
+    current_user: UserProfile = Depends(get_current_user),
+):
+    """
+    Return progressive lazy-loaded graph neighborhood around a focal entity.
+    Initially returns focal entity + depth 1 connections without fetching or loading the entire database.
+    Supports expansion to depth 2 and depth 3.
+    """
+    target_case = case_manager.get_case(case_id) if case_id else case_manager.get_active_case()
+    if not target_case:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    undirected_g = target_case.build_undirected_graph()
+    centrality = compute_centrality(undirected_g)
+    _, node_to_comm = detect_communities(undirected_g, centrality)
+    return target_case.to_neighborhood_node_link(
+        focal_entity_id=entity_id,
+        depth=depth,
+        max_nodes=max_nodes,
+        centrality=centrality,
+        community_map=node_to_comm,
+    )
+
+
 @app.get("/api/graph/centrality", response_model=List[CentralityEntry])
 def get_centrality(current_user: UserProfile = Depends(get_current_user)):
     """Return Priority Entities ranked by degree and betweenness centrality."""
@@ -1957,12 +2054,28 @@ def get_case_report_dossier(case_id: str, current_user: UserProfile = Depends(ge
     case = case_manager.get_case(case_id)
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
+    record_audit(
+        actor_name=current_user.name,
+        action="export_dossier",
+        details=f"Exported investigative intelligence dossier for case {case_id}",
+        case_id=case_id,
+        actor_id=current_user.user_id,
+        actor_role=current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role),
+    )
     return generate_case_report(case, generated_by=current_user.name)
 
 
 @app.get("/api/graph/report", response_model=InvestigationReportResponse)
 def get_active_report_dossier(current_user: UserProfile = Depends(get_current_user)):
     active_case = case_manager.get_active_case()
+    record_audit(
+        actor_name=current_user.name,
+        action="export_dossier",
+        details=f"Exported investigative intelligence dossier for active case {active_case.case_id if active_case else 'none'}",
+        case_id=active_case.case_id if active_case else None,
+        actor_id=current_user.user_id,
+        actor_role=current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role),
+    )
     return generate_case_report(active_case, generated_by=current_user.name)
 
 

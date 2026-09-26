@@ -114,7 +114,13 @@ def classify_and_normalize(raw_content: str) -> ClassificationResult:
             return ClassificationResult("structured", "csv", out_io.getvalue())
         return ClassificationResult("semi_structured", "text", _flatten_rows_to_text(rows))
 
-    # 3. Key:value / log-like lines still count as semi-structured; everything
+    # 3. Try XML / HTML.
+    if content.startswith("<") and ("</" in content or "/>" in content):
+        xml_text = _flatten_xml_to_text(content)
+        if xml_text:
+            return ClassificationResult("semi_structured", "text", xml_text)
+
+    # 4. Key:value / log-like lines still count as semi-structured; everything
     #    else (paragraphs of prose) is unstructured. Both end up as "text" -
     #    this only affects the bucket label shown to the user, not routing.
     lines = [line for line in content.splitlines() if line.strip()]
@@ -124,6 +130,37 @@ def classify_and_normalize(raw_content: str) -> ClassificationResult:
             return ClassificationResult("semi_structured", "text", content)
 
     return ClassificationResult("unstructured", "text", content)
+
+
+def _flatten_xml_to_text(xml_content: str) -> str:
+    import re
+    import xml.etree.ElementTree as ET
+    try:
+        clean = xml_content.strip()
+        try:
+            root = ET.fromstring(clean)
+        except ET.ParseError:
+            root = ET.fromstring(f"<root>{clean}</root>")
+
+        blocks = []
+        for elem in root.iter():
+            tag_name = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+            pairs = []
+            if elem.attrib:
+                for k, v in elem.attrib.items():
+                    pairs.append(f"{k}: {v}")
+            text_val = (elem.text or "").strip()
+            if text_val and len(text_val) > 1:
+                pairs.append(f"{tag_name}: {text_val}")
+            if pairs:
+                blocks.append(", ".join(pairs))
+        if blocks:
+            return "\n\n".join(blocks[:500])
+    except Exception:
+        pass
+    clean_text = re.sub(r"<[^>]+>", " ", xml_content)
+    clean_text = re.sub(r"\s+", " ", clean_text).strip()
+    return clean_text
 
 
 def _try_parse_delimited(content: str) -> List[List[str]]:

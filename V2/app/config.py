@@ -23,7 +23,7 @@ GROQ_API_KEY = os.environ.get(
 
 GROQ_MODEL = os.environ.get(
     "GROQ_MODEL",
-    "openai/gpt-oss-120b"
+    "llama-3.3-70b-versatile"
 )
 
 GROQ_API_URL = os.environ.get(

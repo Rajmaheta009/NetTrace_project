@@ -18,7 +18,15 @@ import {
   Building,
   UserCog,
   Check,
-  X
+  X,
+  Filter,
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Activity,
+  FileText,
+  ListFilter
 } from 'lucide-react';
 import {
   fetchAdminUsers,
@@ -30,6 +38,8 @@ import {
   verifyAuditIntegrity,
   fetchAuditTrail,
   fetchDatabaseHealth,
+  fetchAuditActivity,
+  fetchInspectorIndicators,
 } from '../services/api';
 
 const ROLE_COLORS = {
@@ -103,6 +113,73 @@ export default function AdminPanel({ currentUser, onRoleSwitched }) {
       setLoading(false);
     }
   }, []);
+
+  // Inspector Activity & Factual Indicators State
+  const [activityLogs, setActivityLogs] = useState([]);
+  const [activityTotal, setActivityTotal] = useState(0);
+  const [activityPage, setActivityPage] = useState(1);
+  const [activityLimit, setActivityLimit] = useState(25);
+  const [activityTotalPages, setActivityTotalPages] = useState(1);
+  const [activityLoading, setActivityLoading] = useState(false);
+
+  // Multi-Filter State
+  const [filterInspector, setFilterInspector] = useState('');
+  const [filterRole, setFilterRole] = useState('');
+  const [filterAction, setFilterAction] = useState('');
+  const [filterCaseId, setFilterCaseId] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [filterQuery, setFilterQuery] = useState('');
+  const [sortOrder, setSortOrder] = useState('desc');
+
+  // Factual Indicators State
+  const [selectedInspectorForIndicators, setSelectedInspectorForIndicators] = useState('');
+  const [indicatorsData, setIndicatorsData] = useState(null);
+  const [indicatorsLoading, setIndicatorsLoading] = useState(false);
+
+  const loadActivityLogs = useCallback(async () => {
+    setActivityLoading(true);
+    try {
+      const params = {
+        page: activityPage,
+        limit: activityLimit,
+        sort_order: sortOrder,
+      };
+      if (filterInspector) params.user_id = filterInspector;
+      if (filterRole) params.role = filterRole;
+      if (filterAction) params.action = filterAction;
+      if (filterCaseId) params.case_id = filterCaseId.trim();
+      if (filterStatus) params.status = filterStatus;
+      if (filterQuery) params.q = filterQuery.trim();
+
+      const res = await fetchAuditActivity(params);
+      setActivityLogs(res?.logs || []);
+      setActivityTotal(res?.total || 0);
+      setActivityTotalPages(res?.total_pages || 1);
+    } catch (err) {
+      console.warn('Failed to load inspector activity:', err);
+    } finally {
+      setActivityLoading(false);
+    }
+  }, [activityPage, activityLimit, sortOrder, filterInspector, filterRole, filterAction, filterCaseId, filterStatus, filterQuery]);
+
+  const loadIndicators = useCallback(async (userId = null) => {
+    setIndicatorsLoading(true);
+    try {
+      const res = await fetchInspectorIndicators(userId || null);
+      setIndicatorsData(res);
+    } catch (err) {
+      console.warn('Failed to load factual indicators:', err);
+    } finally {
+      setIndicatorsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'activity') {
+      loadActivityLogs();
+      loadIndicators(selectedInspectorForIndicators || null);
+    }
+  }, [activeTab, loadActivityLogs, loadIndicators, selectedInspectorForIndicators]);
 
   useEffect(() => {
     loadData();
@@ -281,6 +358,23 @@ export default function AdminPanel({ currentUser, onRoleSwitched }) {
         >
           <Key className="w-4 h-4" />
           <span>Roles & Permissions ({roles.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('activity')}
+          className={`px-4 py-2.5 text-xs font-bold rounded-t-xl transition-all border-b-2 flex items-center space-x-2 cursor-pointer ${
+            activeTab === 'activity'
+              ? 'border-cyan-400 text-cyan-300 bg-slate-900/50'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Activity className="w-4 h-4 text-amber-400" />
+          <span>Inspector Activity & Indicators</span>
+          {isSuperAdmin && (
+            <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-[10px] font-mono text-amber-300 border border-amber-500/30">
+              Super Admin
+            </span>
+          )}
         </button>
 
         <button
@@ -633,6 +727,403 @@ export default function AdminPanel({ currentUser, onRoleSwitched }) {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* TAB: INSPECTOR ACTIVITY & FACTUAL INDICATORS */}
+      {activeTab === 'activity' && (
+        <div className="space-y-6">
+          
+          {/* SECTION 1: FACTUAL INDICATOR ANALYSIS & BEHAVIOR PROFILE */}
+          <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-5">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
+              <div>
+                <div className="flex items-center space-x-2">
+                  <Activity className="w-5 h-5 text-amber-400" />
+                  <h3 className="text-base font-black text-white uppercase tracking-wider font-mono">
+                    Inspector Activity & Behavioral Profile (Factual Indicators)
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-400 mt-1 max-w-2xl">
+                  {indicatorsData?.note || 'Objective system metric counters for administrative oversight. NetTrace tracks exact security events without subjective behavioral classifications.'}
+                </p>
+              </div>
+
+              {/* Inspector Selector for Behavioral Profile */}
+              <div className="flex items-center space-x-2">
+                <span className="text-xs font-mono text-slate-400 whitespace-nowrap">Inspector Profile:</span>
+                <select
+                  value={selectedInspectorForIndicators}
+                  onChange={(e) => setSelectedInspectorForIndicators(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-1.5 focus:outline-none focus:border-amber-400/60 font-mono font-bold"
+                >
+                  <option value="">All Inspectors Combined (Aggregate)</option>
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.username} ({u.full_name} - {u.roles?.[0] || 'Investigator'})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => loadIndicators(selectedInspectorForIndicators || null)}
+                  disabled={indicatorsLoading}
+                  className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer"
+                  title="Refresh Indicators"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${indicatorsLoading ? 'animate-spin text-amber-400' : ''}`} />
+                </button>
+              </div>
+            </div>
+
+            {/* Factual Metric Cards Grid */}
+            {(() => {
+              const currentIndicators = indicatorsData?.indicators || indicatorsData?.summary || {};
+              return (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+                    
+                    {/* Card 1: Failed Logins */}
+                    <div className="bg-slate-950/80 border border-slate-800/90 rounded-2xl p-4 flex flex-col justify-between space-y-2 hover:border-slate-700 transition shadow-inner">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-mono text-slate-400 font-bold uppercase tracking-wider">Failed Logins</span>
+                        <div className={`p-2 rounded-xl ${Number(currentIndicators.failed_login_attempts || 0) > 0 ? 'bg-rose-500/20 text-rose-400' : 'bg-slate-900 text-slate-500'}`}>
+                          <Lock className="w-4 h-4" />
+                        </div>
+                      </div>
+                      <div className="text-2xl font-black font-mono text-white">
+                        {currentIndicators.failed_login_attempts ?? 0}
+                      </div>
+                      <p className="text-[10px] text-slate-400">
+                        {Number(currentIndicators.failed_login_attempts || 0) > 0 ? 'Recorded authentication failures' : 'No recorded login failures'}
+                      </p>
+                    </div>
+
+                    {/* Card 2: Deleted Records */}
+                    <div className="bg-slate-950/80 border border-slate-800/90 rounded-2xl p-4 flex flex-col justify-between space-y-2 hover:border-slate-700 transition shadow-inner">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-mono text-slate-400 font-bold uppercase tracking-wider">Deleted Records</span>
+                        <div className={`p-2 rounded-xl ${Number(currentIndicators.deleted_records || 0) > 0 ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-900 text-slate-500'}`}>
+                          <UserX className="w-4 h-4" />
+                        </div>
+                      </div>
+                      <div className="text-2xl font-black font-mono text-white">
+                        {currentIndicators.deleted_records ?? 0}
+                      </div>
+                      <p className="text-[10px] text-slate-400">
+                        {Number(currentIndicators.deleted_records || 0) > 0 ? 'Entities or links removed' : 'Zero deletions logged'}
+                      </p>
+                    </div>
+
+                    {/* Card 3: Large Data Exports */}
+                    <div className="bg-slate-950/80 border border-slate-800/90 rounded-2xl p-4 flex flex-col justify-between space-y-2 hover:border-slate-700 transition shadow-inner">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-mono text-slate-400 font-bold uppercase tracking-wider">Data Exports</span>
+                        <div className={`p-2 rounded-xl ${Number(currentIndicators.large_data_exports || 0) > 0 ? 'bg-sky-500/20 text-sky-400' : 'bg-slate-900 text-slate-500'}`}>
+                          <Download className="w-4 h-4" />
+                        </div>
+                      </div>
+                      <div className="text-2xl font-black font-mono text-white">
+                        {currentIndicators.large_data_exports ?? 0}
+                      </div>
+                      <p className="text-[10px] text-slate-400">
+                        {Number(currentIndicators.large_data_exports || 0) > 0 ? 'Dossier & report extractions' : 'No mass exports recorded'}
+                      </p>
+                    </div>
+
+                    {/* Card 4: Permission Denials (403) */}
+                    <div className="bg-slate-950/80 border border-slate-800/90 rounded-2xl p-4 flex flex-col justify-between space-y-2 hover:border-slate-700 transition shadow-inner">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-mono text-slate-400 font-bold uppercase tracking-wider">Access Denials</span>
+                        <div className={`p-2 rounded-xl ${Number(currentIndicators.permission_errors || 0) > 0 ? 'bg-purple-500/20 text-purple-400' : 'bg-slate-900 text-slate-500'}`}>
+                          <ShieldAlert className="w-4 h-4" />
+                        </div>
+                      </div>
+                      <div className="text-2xl font-black font-mono text-white">
+                        {currentIndicators.permission_errors ?? 0}
+                      </div>
+                      <p className="text-[10px] text-slate-400">
+                        {Number(currentIndicators.permission_errors || 0) > 0 ? 'RBAC 403 access rejections' : 'Zero unauthorized attempts'}
+                      </p>
+                    </div>
+
+                    {/* Card 5: Successful Operations */}
+                    <div className="bg-slate-950/80 border border-slate-800/90 rounded-2xl p-4 flex flex-col justify-between space-y-2 hover:border-slate-700 transition shadow-inner">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-mono text-slate-400 font-bold uppercase tracking-wider">Successful Actions</span>
+                        <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400">
+                          <CheckCircle2 className="w-4 h-4" />
+                        </div>
+                      </div>
+                      <div className="text-2xl font-black font-mono text-emerald-400">
+                        {currentIndicators.successful_operations ?? 0}
+                      </div>
+                      <p className="text-[10px] text-slate-400">
+                        Total completed operations
+                      </p>
+                    </div>
+
+                  </div>
+
+                  {/* Factual Bullet Points if present */}
+                  {Array.isArray(indicatorsData?.factual_indicators) && indicatorsData.factual_indicators.length > 0 && (
+                    <div className="bg-slate-950/60 border border-slate-800/80 rounded-2xl p-3.5 space-y-1.5 text-xs font-mono text-slate-300">
+                      <div className="text-[11px] font-bold text-amber-400 flex items-center space-x-1.5">
+                        <ListFilter className="w-3.5 h-3.5" />
+                        <span>Factual Event Highlights:</span>
+                      </div>
+                      <ul className="list-disc list-inside space-y-1 text-slate-400">
+                        {indicatorsData.factual_indicators.map((stmt, sIdx) => (
+                          <li key={sIdx} className="text-slate-300">{stmt}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+
+          {/* SECTION 2: INSPECTOR ACTIVITY LOG (MULTI-FILTER & PAGINATED) */}
+          <div className="space-y-4">
+            
+            {/* Filter Bar */}
+            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2 flex-1">
+                
+                {/* Search Query */}
+                <div className="relative min-w-[180px] flex-1 sm:max-w-xs">
+                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="Search action or details..."
+                    value={filterQuery}
+                    onChange={(e) => setFilterQuery(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"
+                  />
+                </div>
+
+                {/* Filter Inspector */}
+                <select
+                  value={filterInspector}
+                  onChange={(e) => setFilterInspector(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-cyan-500 font-mono"
+                >
+                  <option value="">All Inspectors</option>
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>{u.username}</option>
+                  ))}
+                </select>
+
+                {/* Filter Role */}
+                <select
+                  value={filterRole}
+                  onChange={(e) => setFilterRole(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-cyan-500 font-mono"
+                >
+                  <option value="">All Roles</option>
+                  <option value="SUPER_ADMIN">SUPER_ADMIN</option>
+                  <option value="ADMIN">ADMIN</option>
+                  <option value="INVESTIGATOR">INVESTIGATOR</option>
+                  <option value="ANALYST">ANALYST</option>
+                  <option value="REVIEWER">REVIEWER</option>
+                  <option value="VIEWER">VIEWER</option>
+                </select>
+
+                {/* Filter Action */}
+                <select
+                  value={filterAction}
+                  onChange={(e) => setFilterAction(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-cyan-500 font-mono"
+                >
+                  <option value="">All Actions</option>
+                  <option value="login">Login</option>
+                  <option value="failed_login">Failed Login</option>
+                  <option value="delete">Delete Records</option>
+                  <option value="export">Data Export</option>
+                  <option value="permission_denied">Permission Denied (403)</option>
+                  <option value="update">Update</option>
+                  <option value="read">Read / Inspect</option>
+                  <option value="insert">Ingest / Insert</option>
+                </select>
+
+                {/* Filter Status */}
+                <select
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-cyan-500 font-mono"
+                >
+                  <option value="">All Statuses</option>
+                  <option value="success">Success</option>
+                  <option value="failure">Failure / Denied</option>
+                </select>
+
+                {/* Filter Case ID */}
+                <input
+                  type="text"
+                  placeholder="Case ID (e.g. case-001)"
+                  value={filterCaseId}
+                  onChange={(e) => setFilterCaseId(e.target.value)}
+                  className="w-32 px-2.5 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"
+                />
+
+                {/* Sort Order */}
+                <select
+                  value={sortOrder}
+                  onChange={(e) => setSortOrder(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-cyan-500 font-mono font-bold"
+                >
+                  <option value="desc">Newest First (DESC)</option>
+                  <option value="asc">Oldest First (ASC)</option>
+                </select>
+              </div>
+
+              {/* Clear Filters & Refresh */}
+              <div className="flex items-center space-x-2">
+                {(filterInspector || filterRole || filterAction || filterCaseId || filterStatus || filterQuery) && (
+                  <button
+                    onClick={() => {
+                      setFilterInspector('');
+                      setFilterRole('');
+                      setFilterAction('');
+                      setFilterCaseId('');
+                      setFilterStatus('');
+                      setFilterQuery('');
+                      setActivityPage(1);
+                    }}
+                    className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-xs font-mono transition cursor-pointer"
+                  >
+                    Clear Filters ✕
+                  </button>
+                )}
+                <button
+                  onClick={loadActivityLogs}
+                  disabled={activityLoading}
+                  className="px-3 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 text-xs font-bold transition flex items-center space-x-1.5 cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${activityLoading ? 'animate-spin' : ''}`} />
+                  <span>Refresh</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Table of Activity Logs */}
+            <div className="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-950/80 border-b border-slate-800 text-slate-400 font-mono text-[11px] uppercase tracking-wider">
+                    <th className="p-3.5">Timestamp</th>
+                    <th className="p-3.5">Inspector / Officer</th>
+                    <th className="p-3.5">Role</th>
+                    <th className="p-3.5">Action Executed</th>
+                    <th className="p-3.5">Target / Details</th>
+                    <th className="p-3.5">Case ID</th>
+                    <th className="p-3.5">Status</th>
+                    <th className="p-3.5">Client IP</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {activityLoading ? (
+                    <tr>
+                      <td colSpan={8} className="p-8 text-center text-slate-400 font-mono">
+                        <RefreshCw className="w-5 h-5 animate-spin mx-auto text-cyan-400 mb-2" />
+                        <span>Querying audit activity ledger...</span>
+                      </td>
+                    </tr>
+                  ) : activityLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-8 text-center text-slate-500 italic">
+                        No activity records matched the selected filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    activityLogs.map((log, idx) => {
+                      const isFail = log.status?.toLowerCase() === 'failure';
+                      const isDangerAction = log.action?.includes('delete') || log.action?.includes('failed') || log.action?.includes('denied');
+                      const isExportAction = log.action?.includes('export');
+
+                      return (
+                        <tr key={log.id || idx} className="hover:bg-slate-800/30 transition">
+                          <td className="p-3.5 font-mono text-slate-400 whitespace-nowrap">
+                            {log.timestamp ? new Date(log.timestamp).toLocaleString() : 'Just now'}
+                          </td>
+                          <td className="p-3.5 font-semibold text-slate-200">
+                            <div>{log.user_name || log.user_id || 'System'}</div>
+                          </td>
+                          <td className="p-3.5">
+                            <span className={`px-2 py-0.5 rounded-full border text-[10px] font-mono font-bold ${ROLE_COLORS[log.role] || 'bg-slate-800 border-slate-700 text-slate-300'}`}>
+                              {log.role || 'Officer'}
+                            </span>
+                          </td>
+                          <td className="p-3.5 font-mono">
+                            <span className={`px-2 py-0.5 rounded-md font-bold text-[11px] ${
+                              isDangerAction
+                                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                                : isExportAction
+                                ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
+                                : 'bg-slate-800 text-slate-200'
+                            }`}>
+                              {log.action}
+                            </span>
+                          </td>
+                          <td className="p-3.5 text-slate-300 max-w-xs truncate" title={log.details}>
+                            {log.details || log.entity_id || '-'}
+                          </td>
+                          <td className="p-3.5 font-mono text-[11px]">
+                            {log.case_id ? (
+                              <span className="px-1.5 py-0.5 rounded bg-cyan-950/60 border border-cyan-800/60 text-cyan-300 font-bold">
+                                {log.case_id}
+                              </span>
+                            ) : (
+                              <span className="text-slate-600">-</span>
+                            )}
+                          </td>
+                          <td className="p-3.5">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold uppercase tracking-wider ${
+                              isFail
+                                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                            }`}>
+                              {log.status || 'success'}
+                            </span>
+                          </td>
+                          <td className="p-3.5 font-mono text-slate-500 text-[11px] whitespace-nowrap">
+                            {log.ip_address || '127.0.0.1'}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+
+              {/* Pagination Controls */}
+              <div className="p-4 bg-slate-950/80 border-t border-slate-800 flex items-center justify-between text-xs font-mono text-slate-400">
+                <div>
+                  Showing page <strong className="text-white">{activityPage}</strong> of <strong className="text-white">{activityTotalPages}</strong> ({activityTotal} total actions)
+                </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setActivityPage(prev => Math.max(1, prev - 1))}
+                    disabled={activityPage <= 1 || activityLoading}
+                    className="flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>Previous</span>
+                  </button>
+                  <button
+                    onClick={() => setActivityPage(prev => Math.min(activityTotalPages, prev + 1))}
+                    disabled={activityPage >= activityTotalPages || activityLoading}
+                    className="flex items-center space-x-1 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer"
+                  >
+                    <span>Next</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
         </div>
       )}
 

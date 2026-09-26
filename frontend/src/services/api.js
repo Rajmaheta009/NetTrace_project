@@ -15,6 +15,36 @@ function getAuthHeaders(extraHeaders = {}) {
   return headers;
 }
 
+// Global 401 session expiration handler
+let sessionExpiredNotified = false;
+
+export async function authFetch(url, options = {}) {
+  const headers = getAuthHeaders(options.headers || {});
+  const res = await fetch(url, { ...options, headers });
+
+  if (res.status === 401) {
+    // Clear invalid session tokens
+    sessionStorage.removeItem('nettrace_token');
+    sessionStorage.removeItem('nettrace_role');
+    sessionStorage.removeItem('nettrace_user');
+    localStorage.removeItem('nettrace_token');
+    localStorage.removeItem('nettrace_role');
+    localStorage.removeItem('nettrace_user');
+
+    if (!sessionExpiredNotified) {
+      sessionExpiredNotified = true;
+      setTimeout(() => { sessionExpiredNotified = false; }, 4000);
+      window.dispatchEvent(
+        new CustomEvent('nettrace:session-expired', {
+          detail: { message: 'Your session has expired. Please log in again.' }
+        })
+      );
+    }
+  }
+
+  return res;
+}
+
 export async function checkHealth() {
   const res = await fetch(`${API_BASE}/health`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
@@ -22,8 +52,20 @@ export async function checkHealth() {
 }
 
 export async function fetchGraph() {
-  const res = await fetch(`${API_BASE}/api/graph`, { headers: getAuthHeaders() });
+  const res = await authFetch(`${API_BASE}/api/graph`);
   if (!res.ok) throw new Error(`Failed to load graph: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchGraphNeighborhood(entityId = null, depth = 1, caseId = null, maxNodes = 80) {
+  const params = new URLSearchParams();
+  if (entityId) params.append('entity_id', entityId);
+  params.append('depth', depth.toString());
+  if (caseId) params.append('case_id', caseId);
+  params.append('max_nodes', maxNodes.toString());
+
+  const res = await authFetch(`${API_BASE}/api/graph/neighborhood?${params.toString()}`);
+  if (!res.ok) throw new Error(`Failed to load graph neighborhood: ${res.status}`);
   return res.json();
 }
 
@@ -140,8 +182,30 @@ export async function fetchAuditTrail(limit = 100) {
 }
 
 export async function verifyAuditIntegrity() {
-  const res = await fetch(`${API_BASE}/api/audit/verify`, { headers: getAuthHeaders() });
+  const res = await authFetch(`${API_BASE}/api/audit/verify`);
   if (!res.ok) throw new Error(`Audit integrity verification failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchAuditActivity(filters = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([k, v]) => {
+    if (v !== null && v !== undefined && v !== '') {
+      params.append(k, v.toString());
+    }
+  });
+
+  const res = await authFetch(`${API_BASE}/api/audit/activity?${params.toString()}`);
+  if (!res.ok) throw new Error(`Failed to fetch audit activity: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchInspectorIndicators(userId = null) {
+  const url = userId 
+    ? `${API_BASE}/api/audit/inspector-indicators?user_id=${encodeURIComponent(userId)}`
+    : `${API_BASE}/api/audit/inspector-indicators`;
+  const res = await authFetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch inspector indicators: ${res.status}`);
   return res.json();
 }
 

@@ -10,9 +10,12 @@ Module 2 & 3 - Entity & Relationship Extraction (PRD section 11 / section 15)
 """
 
 import json
+import logging
 import re
 import uuid
 from typing import Dict, List, Optional, Tuple
+
+logger = logging.getLogger("nettrace.extraction")
 
 from app.ai_client import (
     AIUnavailableError,
@@ -473,8 +476,14 @@ def extract_from_text_chunk(
         raw_response = call_groq_json(EXTRACTION_SYSTEM_PROMPT, user_prompt)
         cleaned_json = extract_clean_json_str(raw_response)
         parsed = json.loads(cleaned_json)
+        if not isinstance(parsed, dict):
+            parsed = None
     except (AIUnavailableError, json.JSONDecodeError) as exc:
-        warnings.append(f"AI extraction unavailable ({exc}); engaging deterministic heuristic extraction.")
+        logger.warning(f"AI extraction unavailable on {source_ref}: {exc}")
+        warnings.append(f"AI extraction unavailable ({exc}). Engaging deterministic heuristic extraction.")
+    except Exception as exc:
+        logger.error(f"Unexpected error during AI extraction on {source_ref}: {exc}", exc_info=True)
+        warnings.append("AI extraction encountered unexpected format. Engaging deterministic heuristic extraction.")
 
     if not parsed or not parsed.get("entities"):
         h_entities, h_relationships = _heuristic_text_extraction(chunk_text, regex_entities, source_ref)

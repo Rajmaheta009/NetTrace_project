@@ -475,6 +475,11 @@ class GraphResponse(BaseModel):
     multigraph: bool = True
     nodes: List[GraphNodeOut]
     links: List[GraphLinkOut]
+    focal_entity_id: Optional[str] = None
+    depth: Optional[int] = None
+    total_case_nodes: Optional[int] = None
+    total_case_edges: Optional[int] = None
+    has_more: Optional[bool] = None
 
 
 class CentralityEntry(BaseModel):
