@@ -299,6 +299,7 @@ class UserCreateRequest(BaseModel):
     username: str
     email: str
     password: str
+    confirm_password: Optional[str] = None
     full_name: str
     department: Optional[str] = "Forensic Intelligence"
     designation: Optional[str] = "Investigator"
@@ -310,6 +311,10 @@ class UserUpdateRequest(BaseModel):
     department: Optional[str] = None
     designation: Optional[str] = None
     email: Optional[str] = None
+    status: Optional[str] = None  # ACTIVE, INACTIVE, SUSPENDED
+    roles: Optional[List[str]] = None
+    password: Optional[str] = None
+    confirm_password: Optional[str] = None
 
 
 class UserStatusUpdateRequest(BaseModel):

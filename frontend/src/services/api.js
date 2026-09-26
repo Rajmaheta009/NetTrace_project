@@ -705,6 +705,18 @@ export async function assignAdminUserRoles(userId, roles) {
   return data;
 }
 
+export async function deleteAdminUser(userId) {
+  const res = await fetch(`${API_BASE}/api/admin/users/${encodeURIComponent(userId)}`, {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || data.message || `Failed to deactivate user: HTTP ${res.status}`);
+  }
+  return data;
+}
+
 export async function fetchAdminRoles() {
   const res = await fetch(`${API_BASE}/api/admin/roles`, { headers: getAuthHeaders() });
   if (!res.ok) {

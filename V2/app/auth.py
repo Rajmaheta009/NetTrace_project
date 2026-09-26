@@ -100,6 +100,7 @@ ALL_PERMISSIONS: Dict[str, Dict[str, str]] = {
     "USER_CREATE": {"desc": "Create user accounts", "cat": "Admin"},
     "USER_UPDATE": {"desc": "Edit user profiles and account statuses", "cat": "Admin"},
     "USER_DEACTIVATE": {"desc": "Suspend or deactivate user accounts", "cat": "Admin"},
+    "USER_DELETE": {"desc": "Delete, deactivate, or purge user accounts", "cat": "Admin"},
     "ROLE_VIEW": {"desc": "View system roles and permission sets", "cat": "Admin"},
     "ROLE_CREATE": {"desc": "Create and manage custom roles", "cat": "Admin"},
     "ROLE_UPDATE": {"desc": "Modify role definitions and permission mappings", "cat": "Admin"},
@@ -610,24 +611,92 @@ def require_case_access(min_case_role: Optional[str] = None) -> Callable:
 
 
 # -------------------------------------------------------------
-# System Role Protection Functions
+# System Role Protection Functions & Super Admin Safeguards
 # -------------------------------------------------------------
 
-def can_modify_user(actor: AuthenticatedUser, target_user: UserDB) -> bool:
+def count_active_super_admins(db: Session) -> int:
+    """Returns the total number of ACTIVE users holding the SUPER_ADMIN role."""
+    return (
+        db.query(UserDB)
+        .filter(
+            UserDB.status == "ACTIVE",
+            (UserDB.role == "SUPER_ADMIN") | (UserDB.roles.any(RoleDB.name == "SUPER_ADMIN"))
+        )
+        .distinct()
+        .count()
+    )
+
+
+def can_modify_user(
+    actor: AuthenticatedUser,
+    target_user: UserDB,
+    is_deactivate_or_delete: bool = False,
+    db: Optional[Session] = None,
+) -> bool:
     """
     Enforces role hierarchy protections:
-    - Super Admin can modify anyone.
+    - Actor cannot delete/deactivate their own account.
+    - Super Admin can modify anyone, but cannot delete/deactivate the LAST Super Admin.
     - Admin cannot modify, demote, or delete Super Admin.
     - Normal users cannot modify other users.
     """
-    if actor.is_super_admin:
-        return True
-
-    target_roles = [r.name.upper() for r in target_user.roles] + [target_user.role.upper()]
-    if "SUPER_ADMIN" in target_roles:
+    # 1. Self-deletion / self-deactivation prevention
+    if is_deactivate_or_delete and actor.user_id == target_user.id:
         return False
 
-    return actor.is_admin
+    target_roles = [r.name.upper() for r in target_user.roles] + [target_user.role.upper()]
+    is_target_super_admin = "SUPER_ADMIN" in target_roles
+
+    # 2. Only Super Admin can modify Super Admin
+    if is_target_super_admin and not actor.is_super_admin:
+        return False
+
+    # 3. Super Admin cannot delete/deactivate the LAST remaining active Super Admin
+    if is_target_super_admin and is_deactivate_or_delete and db:
+        active_sadmin_count = count_active_super_admins(db)
+        if active_sadmin_count <= 1:
+            return False
+
+    return actor.is_admin or actor.is_super_admin
+
+
+def check_user_modification_allowed(
+    actor: AuthenticatedUser,
+    target_user: UserDB,
+    is_deactivate_or_delete: bool = False,
+    db: Optional[Session] = None,
+) -> None:
+    """
+    Validates user modification or deletion permissions, raising HTTP 403 on violation.
+    """
+    if is_deactivate_or_delete and actor.user_id == target_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Security Violation: You cannot delete or deactivate your own account.",
+        )
+
+    target_roles = [r.name.upper() for r in target_user.roles] + [target_user.role.upper()]
+    is_target_super_admin = "SUPER_ADMIN" in target_roles
+
+    if is_target_super_admin and not actor.is_super_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Security Violation: Cannot modify, suspend, or delete a Super Admin user account.",
+        )
+
+    if is_target_super_admin and is_deactivate_or_delete and db:
+        active_sadmin_count = count_active_super_admins(db)
+        if active_sadmin_count <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Security Violation: Cannot delete or deactivate the last remaining Super Admin account (Administrative Lockout Prevention).",
+            )
+
+    if not (actor.is_admin or actor.is_super_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Security Violation: Administrative privileges required to manage user accounts.",
+        )
 
 
 def can_assign_roles(actor: AuthenticatedUser, roles_to_assign: List[str]) -> bool:
@@ -637,14 +706,54 @@ def can_assign_roles(actor: AuthenticatedUser, roles_to_assign: List[str]) -> bo
     - Admin can assign ADMIN, INVESTIGATOR, ANALYST, REVIEWER, VIEWER.
     - Non-admins cannot assign any roles.
     """
-    if actor.is_super_admin:
-        return True
-
-    if not actor.is_admin:
+    if not (actor.is_admin or actor.is_super_admin):
         return False
 
     norm_to_assign = {r.strip().upper().replace(" ", "_") for r in roles_to_assign}
-    if "SUPER_ADMIN" in norm_to_assign:
+    if "SUPER_ADMIN" in norm_to_assign and not actor.is_super_admin:
         return False
 
     return True
+
+
+def check_role_assignment_allowed(
+    actor: AuthenticatedUser,
+    target_user: Optional[UserDB],
+    roles_to_assign: List[str],
+    db: Optional[Session] = None,
+) -> None:
+    """
+    Validates role changes, preventing privilege escalation and demotion of the last Super Admin.
+    """
+    if not (actor.is_admin or actor.is_super_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Security Violation: Administrative privileges required to assign roles.",
+        )
+
+    norm_to_assign = {r.strip().upper().replace(" ", "_") for r in roles_to_assign}
+    if "SUPER_ADMIN" in norm_to_assign and not actor.is_super_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Security Violation: Only Super Admin can assign the Super Admin role.",
+        )
+
+    # If modifying an existing Super Admin, verify they aren't the last Super Admin being demoted
+    if target_user:
+        target_roles = [r.name.upper() for r in target_user.roles] + [target_user.role.upper()]
+        is_target_super_admin = "SUPER_ADMIN" in target_roles
+
+        if is_target_super_admin and not actor.is_super_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Security Violation: Only Super Admin can modify roles of a Super Admin account.",
+            )
+
+        if is_target_super_admin and "SUPER_ADMIN" not in norm_to_assign and db:
+            active_sadmin_count = count_active_super_admins(db)
+            if active_sadmin_count <= 1:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Security Violation: Cannot demote the last remaining Super Admin account (Administrative Lockout Prevention).",
+                )
+

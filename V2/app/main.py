@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from sqlalchemy import func
 from app.analytics import compute_centrality, ranked_entities
 from app.audit_logger import (
     get_audit_trail,
@@ -30,6 +31,9 @@ from app.auth import (
     DEFAULT_ROLE_PERMISSIONS,
     can_assign_roles,
     can_modify_user,
+    check_role_assignment_allowed,
+    check_user_modification_allowed,
+    count_active_super_admins,
     create_access_token,
     create_refresh_token,
     decode_access_token,
@@ -254,6 +258,32 @@ def _build_user_out(user: UserDB, db) -> UserOut:
     )
 
 
+EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
+
+def validate_user_credentials(email: str, password: Optional[str] = None, confirm_password: Optional[str] = None):
+    """
+    Strict server-side validation for officer email format and password strength.
+    Passwords must be >= 8 chars with mixed letters and numbers.
+    Never exposes passwords in log files or response objects.
+    """
+    if not email or not EMAIL_REGEX.match(email.strip()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid email format. Please provide a valid email address.",
+        )
+    if password is not None:
+        if len(password) < 8 or not any(c.isalpha() for c in password) or not any(c.isdigit() for c in password):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password must be at least 8 characters long and contain both letters and digits.",
+            )
+        if confirm_password is not None and password != confirm_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Passwords do not match.",
+            )
+
+
 # -------------------------------------------------------------
 # System & Health Endpoints
 # -------------------------------------------------------------
@@ -402,28 +432,42 @@ def get_inspector_indicators(
 # -------------------------------------------------------------
 
 @app.post("/api/auth/register", response_model=UserOut)
-def register_user(req: RegisterRequest):
-    """Self-registration for new intelligence officers with default Viewer access."""
+def register_user(
+    req: RegisterRequest,
+    current_user: AuthenticatedUser = Depends(require_permission("USER_CREATE")),
+):
+    """
+    Secure Officer Registration & Account Provisioning.
+    Requires administrative authorization (USER_CREATE permission).
+    Enforces password complexity, email verification, and role hierarchy protections.
+    """
+    validate_user_credentials(req.email, req.password)
+    clean_username = req.username.strip()
+    clean_email = req.email.strip()
+    target_role_str = (req.role or "INVESTIGATOR").strip().upper().replace(" ", "_")
+
     db = SessionLocal()
     try:
+        check_role_assignment_allowed(current_user, None, [target_role_str], db=db)
+
         existing = db.query(UserDB).filter(
-            (UserDB.username == req.username) | (UserDB.email == req.email)
+            (func.lower(UserDB.username) == clean_username.lower()) |
+            (func.lower(UserDB.email) == clean_email.lower())
         ).first()
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Username or email already registered",
+                detail="Username or email already registered in system",
             )
         now_str = datetime.now(timezone.utc).isoformat()
         user_id = f"USR-{uuid.uuid4().hex[:8].upper()}"
         hashed_pw = hash_password(req.password)
-        target_role_str = (req.role or "VIEWER").strip().upper().replace(" ", "_")
         new_user = UserDB(
             id=user_id,
-            username=req.username,
-            email=req.email,
+            username=clean_username,
+            email=clean_email,
             password_hash=hashed_pw,
-            full_name=req.full_name,
+            full_name=req.full_name.strip(),
             department=req.department or "Forensic Intelligence",
             designation=req.designation or "Investigator",
             status="ACTIVE",
@@ -436,7 +480,7 @@ def register_user(req: RegisterRequest):
 
         role_rec = db.query(RoleDB).filter(RoleDB.name == target_role_str).first()
         if not role_rec:
-            role_rec = db.query(RoleDB).filter(RoleDB.name == "VIEWER").first()
+            role_rec = db.query(RoleDB).filter(RoleDB.name == "INVESTIGATOR").first()
         if role_rec:
             db.add(UserRoleDB(user_id=new_user.id, role_id=role_rec.id))
 
@@ -444,11 +488,12 @@ def register_user(req: RegisterRequest):
         db.refresh(new_user)
 
         record_audit(
-            actor_name=new_user.full_name,
-            action="user_register",
-            details=f"User {new_user.username} registered with role {role_rec.name if role_rec else 'VIEWER'}",
-            actor_id=new_user.id,
-            actor_role=role_rec.name if role_rec else "VIEWER",
+            actor_name=current_user.name,
+            action="admin_register_user",
+            details=f"Officer {current_user.name} provisioned account {new_user.username} ({new_user.id}) with role {target_role_str}",
+            actor_id=current_user.user_id,
+            actor_role=current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role),
+            resource_id=new_user.id,
         )
 
         return _build_user_out(new_user, db)
@@ -639,33 +684,38 @@ def admin_create_user(
     req: UserCreateRequest,
     current_user: AuthenticatedUser = Depends(require_permission("USER_CREATE")),
 ):
-    """Creates a new officer account with specified roles and credentials."""
-    if not can_assign_roles(current_user, req.roles):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Cannot assign roles exceeding your administrative privilege level",
-        )
+    """
+    Creates a new officer account with specified roles and credentials.
+    Enforces email validation, password complexity, role privilege checks, and uniqueness.
+    """
+    validate_user_credentials(req.email, req.password, req.confirm_password)
+    clean_username = req.username.strip()
+    clean_email = req.email.strip()
 
     db = SessionLocal()
     try:
+        check_role_assignment_allowed(current_user, None, req.roles, db=db)
+
         existing = db.query(UserDB).filter(
-            (UserDB.username == req.username) | (UserDB.email == req.email)
+            (func.lower(UserDB.username) == clean_username.lower()) |
+            (func.lower(UserDB.email) == clean_email.lower())
         ).first()
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Username or email already exists",
+                detail="Username or email already exists in system",
             )
+
         now_str = datetime.now(timezone.utc).isoformat()
         user_id = f"USR-{uuid.uuid4().hex[:8].upper()}"
         hashed_pw = hash_password(req.password)
         primary_role = req.roles[0] if req.roles else "INVESTIGATOR"
         new_user = UserDB(
             id=user_id,
-            username=req.username,
-            email=req.email,
+            username=clean_username,
+            email=clean_email,
             password_hash=hashed_pw,
-            full_name=req.full_name,
+            full_name=req.full_name.strip(),
             department=req.department or "Forensic Intelligence",
             designation=req.designation or "Investigator",
             status="ACTIVE",
@@ -705,30 +755,69 @@ def admin_update_user(
     req: UserUpdateRequest,
     current_user: AuthenticatedUser = Depends(require_permission("USER_UPDATE")),
 ):
-    """Updates user profile metadata with system-role protection hierarchy."""
+    """
+    Updates user profile metadata with system-role protection and lockout safeguards.
+    """
     db = SessionLocal()
     try:
         target = db.query(UserDB).filter(UserDB.id == user_id).first()
         if not target:
             raise HTTPException(status_code=404, detail="User not found")
 
-        if not can_modify_user(current_user, target):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Security Violation: Cannot modify a Super Admin user account",
-            )
+        # Check basic modification authorization
+        check_user_modification_allowed(current_user, target, is_deactivate_or_delete=False, db=db)
 
-        if req.full_name is not None:
-            target.full_name = req.full_name
+        # 1. Update basic profile fields
+        if req.full_name is not None and req.full_name.strip():
+            target.full_name = req.full_name.strip()
         if req.department is not None:
-            target.department = req.department
+            target.department = req.department.strip()
         if req.designation is not None:
-            target.designation = req.designation
-        if req.email is not None:
-            other = db.query(UserDB).filter(UserDB.email == req.email, UserDB.id != user_id).first()
+            target.designation = req.designation.strip()
+
+        # 2. Update email if provided
+        if req.email is not None and req.email.strip():
+            validate_user_credentials(req.email)
+            clean_email = req.email.strip()
+            other = db.query(UserDB).filter(func.lower(UserDB.email) == clean_email.lower(), UserDB.id != user_id).first()
             if other:
                 raise HTTPException(status_code=409, detail="Email already in use by another account")
-            target.email = req.email
+            target.email = clean_email
+
+        # 3. Update password if provided
+        if req.password is not None and req.password.strip():
+            validate_user_credentials(target.email, req.password, req.confirm_password)
+            target.password_hash = hash_password(req.password)
+            # Revoke previous tokens on credential change
+            db.query(RefreshTokenDB).filter(
+                RefreshTokenDB.user_id == user_id,
+                RefreshTokenDB.revoked == False,
+            ).update({"revoked": True})
+
+        # 4. Update status if provided
+        if req.status is not None:
+            new_status = req.status.strip().upper()
+            if new_status not in ("ACTIVE", "INACTIVE", "SUSPENDED"):
+                raise HTTPException(status_code=400, detail="Invalid status value (must be ACTIVE, INACTIVE, or SUSPENDED)")
+            if new_status in ("INACTIVE", "SUSPENDED"):
+                check_user_modification_allowed(current_user, target, is_deactivate_or_delete=True, db=db)
+                db.query(RefreshTokenDB).filter(
+                    RefreshTokenDB.user_id == user_id,
+                    RefreshTokenDB.revoked == False,
+                ).update({"revoked": True})
+            target.status = new_status
+
+        # 5. Update roles if provided
+        if req.roles is not None:
+            check_role_assignment_allowed(current_user, target, req.roles, db=db)
+            db.query(UserRoleDB).filter(UserRoleDB.user_id == user_id).delete()
+            for r_name in req.roles:
+                norm_r = r_name.strip().upper().replace(" ", "_")
+                r_obj = db.query(RoleDB).filter(RoleDB.name == norm_r).first()
+                if r_obj:
+                    db.add(UserRoleDB(user_id=user_id, role_id=r_obj.id))
+            if req.roles:
+                target.role = req.roles[0].strip().upper().replace(" ", "_")
 
         target.updated_at = datetime.now(timezone.utc).isoformat()
         db.commit()
@@ -754,27 +843,27 @@ def admin_update_user_status(
     req: UserStatusUpdateRequest,
     current_user: AuthenticatedUser = Depends(require_permission("USER_DEACTIVATE")),
 ):
-    """Suspends, deactivates, or activates user accounts and revokes active tokens on deactivation."""
+    """
+    Suspends, deactivates, or activates user accounts and revokes active tokens on deactivation.
+    Guards against self-deactivation and disabling the last remaining Super Admin.
+    """
     db = SessionLocal()
     try:
         target = db.query(UserDB).filter(UserDB.id == user_id).first()
         if not target:
             raise HTTPException(status_code=404, detail="User not found")
 
-        if not can_modify_user(current_user, target):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Security Violation: Cannot deactivate or suspend a Super Admin user account",
-            )
-
-        new_status = req.status.upper()
+        new_status = req.status.strip().upper()
         if new_status not in ("ACTIVE", "INACTIVE", "SUSPENDED"):
-            raise HTTPException(status_code=400, detail="Invalid status value")
+            raise HTTPException(status_code=400, detail="Invalid status value (must be ACTIVE, INACTIVE, or SUSPENDED)")
+
+        is_deactivating = new_status in ("INACTIVE", "SUSPENDED")
+        check_user_modification_allowed(current_user, target, is_deactivate_or_delete=is_deactivating, db=db)
 
         target.status = new_status
         target.updated_at = datetime.now(timezone.utc).isoformat()
 
-        if new_status in ("INACTIVE", "SUSPENDED"):
+        if is_deactivating:
             db.query(RefreshTokenDB).filter(
                 RefreshTokenDB.user_id == user_id,
                 RefreshTokenDB.revoked == False,
@@ -803,24 +892,18 @@ def admin_assign_user_roles(
     req: UserRoleAssignRequest,
     current_user: AuthenticatedUser = Depends(require_permission("ROLE_ASSIGN")),
 ):
-    """Assigns or updates role authorizations for an officer account."""
+    """
+    Assigns or updates role authorizations for an officer account.
+    Protects against privilege escalation and demoting the last Super Admin.
+    """
     db = SessionLocal()
     try:
         target = db.query(UserDB).filter(UserDB.id == user_id).first()
         if not target:
             raise HTTPException(status_code=404, detail="User not found")
 
-        if not can_modify_user(current_user, target):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Security Violation: Cannot modify roles for a Super Admin user account",
-            )
-
-        if not can_assign_roles(current_user, req.roles):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Security Violation: Only Super Admin can assign the Super Admin role",
-            )
+        check_user_modification_allowed(current_user, target, is_deactivate_or_delete=False, db=db)
+        check_role_assignment_allowed(current_user, target, req.roles, db=db)
 
         db.query(UserRoleDB).filter(UserRoleDB.user_id == user_id).delete()
 
@@ -847,6 +930,55 @@ def admin_assign_user_roles(
         )
 
         return _build_user_out(target, db)
+    finally:
+        db.close()
+
+
+@app.delete("/api/admin/users/{user_id}")
+def admin_delete_user(
+    user_id: str,
+    current_user: AuthenticatedUser = Depends(require_permission("USER_DEACTIVATE")),
+):
+    """
+    Safely deactivates an officer account (soft deletion), revoking all active sessions
+    while preserving evidence lineage, case assignments, and audit history.
+    Protects against self-deletion and removing the last remaining Super Admin.
+    """
+    db = SessionLocal()
+    try:
+        target = db.query(UserDB).filter(UserDB.id == user_id).first()
+        if not target:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Enforce self-deletion & last Super Admin protection
+        check_user_modification_allowed(current_user, target, is_deactivate_or_delete=True, db=db)
+
+        # Soft delete: set status to INACTIVE and revoke all refresh tokens
+        target.status = "INACTIVE"
+        target.updated_at = datetime.now(timezone.utc).isoformat()
+
+        db.query(RefreshTokenDB).filter(
+            RefreshTokenDB.user_id == user_id,
+            RefreshTokenDB.revoked == False,
+        ).update({"revoked": True})
+
+        db.commit()
+        db.refresh(target)
+
+        record_audit(
+            actor_name=current_user.name,
+            action="admin_delete_user",
+            details=f"Deactivated officer account {target.username} ({user_id}) with full history preserved",
+            resource_id=user_id,
+            actor_id=current_user.user_id,
+            actor_role=current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role),
+        )
+
+        return {
+            "success": True,
+            "message": f"Officer account {target.username} ({user_id}) has been deactivated.",
+            "user": _build_user_out(target, db),
+        }
     finally:
         db.close()
 

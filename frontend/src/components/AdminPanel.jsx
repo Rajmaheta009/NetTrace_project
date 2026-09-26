@@ -26,11 +26,16 @@ import {
   Download,
   Activity,
   FileText,
-  ListFilter
+  ListFilter,
+  Edit3,
+  Trash2,
+  UserMinus
 } from 'lucide-react';
 import {
   fetchAdminUsers,
   createAdminUser,
+  updateAdminUser,
+  deleteAdminUser,
   updateAdminUserStatus,
   assignAdminUserRoles,
   fetchAdminRoles,
@@ -83,9 +88,27 @@ export default function AdminPanel({ currentUser, onRoleSwitched }) {
   const [newEmail, setNewEmail] = useState('');
   const [newFullName, setNewFullName] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [newConfirmPassword, setNewConfirmPassword] = useState('');
   const [newDepartment, setNewDepartment] = useState('Forensic Intelligence');
   const [newDesignation, setNewDesignation] = useState('Investigator');
   const [newRole, setNewRole] = useState('INVESTIGATOR');
+  const [createValidationError, setCreateValidationError] = useState('');
+
+  // Edit user form state
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedUserForEdit, setSelectedUserForEdit] = useState(null);
+  const [editFullName, setEditFullName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editDepartment, setEditDepartment] = useState('');
+  const [editDesignation, setEditDesignation] = useState('');
+  const [editStatus, setEditStatus] = useState('ACTIVE');
+  const [editPassword, setEditPassword] = useState('');
+  const [editValidationError, setEditValidationError] = useState('');
+
+  // Delete / Deactivate modal state
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [selectedUserForDelete, setSelectedUserForDelete] = useState(null);
+  const [deleteError, setDeleteError] = useState('');
 
   const isSuperAdmin = currentUser?.roles?.includes('SUPER_ADMIN') || 
                       currentUser?.role === 'Super Admin' ||
@@ -201,9 +224,20 @@ export default function AdminPanel({ currentUser, onRoleSwitched }) {
   };
 
   const handleStatusToggle = async (user, targetStatus) => {
-    if (user.roles.includes('SUPER_ADMIN') && !isSuperAdmin) {
+    if (user.roles?.includes('SUPER_ADMIN') && !isSuperAdmin) {
       alert('Security Policy: Only Super Admin can modify Super Admin accounts.');
       return;
+    }
+    if ((user.id === currentUser?.user_id || user.id === currentUser?.id) && targetStatus !== 'ACTIVE') {
+      alert('Security Violation: You cannot deactivate or suspend your own account.');
+      return;
+    }
+    if (user.roles?.includes('SUPER_ADMIN') && targetStatus !== 'ACTIVE') {
+      const activeSuperAdmins = users.filter(u => u.roles?.includes('SUPER_ADMIN') && u.status === 'ACTIVE');
+      if (activeSuperAdmins.length <= 1) {
+        alert('Security Violation: Cannot deactivate or suspend the last remaining Super Admin account (Administrative Lockout Prevention).');
+        return;
+      }
     }
     try {
       await updateAdminUserStatus(user.id, targetStatus);
@@ -216,7 +250,7 @@ export default function AdminPanel({ currentUser, onRoleSwitched }) {
   };
 
   const handleOpenRoleModal = (user) => {
-    if (user.roles.includes('SUPER_ADMIN') && !isSuperAdmin) {
+    if (user.roles?.includes('SUPER_ADMIN') && !isSuperAdmin) {
       alert('Security Policy: Only Super Admin can modify Super Admin accounts.');
       return;
     }
@@ -238,17 +272,130 @@ export default function AdminPanel({ currentUser, onRoleSwitched }) {
     }
   };
 
-  const handleCreateUser = async (e) => {
-    e.preventDefault();
-    if (!newUsername || !newEmail || !newPassword || !newFullName) {
-      alert('Please complete all required fields.');
+  const handleOpenEditModal = (user) => {
+    const isTargetSuperAdmin = user.roles?.includes('SUPER_ADMIN');
+    if (isTargetSuperAdmin && !isSuperAdmin) {
+      alert('Security Policy: Only Super Admin can modify Super Admin accounts.');
       return;
     }
+    setSelectedUserForEdit(user);
+    setEditFullName(user.full_name || '');
+    setEditEmail(user.email || '');
+    setEditDepartment(user.department || 'Forensic Intelligence');
+    setEditDesignation(user.designation || 'Investigator');
+    setEditStatus(user.status || 'ACTIVE');
+    setEditPassword('');
+    setEditValidationError('');
+    setIsEditModalOpen(true);
+  };
+
+  const handleSaveEditUser = async (e) => {
+    e.preventDefault();
+    if (!selectedUserForEdit) return;
+    setEditValidationError('');
+
+    if (!editFullName.trim() || !editEmail.trim()) {
+      setEditValidationError('Full Name and Official Email are required fields.');
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(editEmail.trim())) {
+      setEditValidationError('Please enter a valid official email address format.');
+      return;
+    }
+
+    if (editPassword && (editPassword.length < 8 || !/[a-zA-Z]/.test(editPassword) || !/[0-9]/.test(editPassword))) {
+      setEditValidationError('New password must be at least 8 characters long and contain both letters and digits.');
+      return;
+    }
+
+    const payload = {
+      full_name: editFullName.trim(),
+      email: editEmail.trim(),
+      department: editDepartment.trim(),
+      designation: editDesignation.trim(),
+      status: editStatus,
+    };
+    if (editPassword) {
+      payload.password = editPassword;
+    }
+
+    try {
+      await updateAdminUser(selectedUserForEdit.id, payload);
+      setIsEditModalOpen(false);
+      setSuccessMsg(`Officer profile for ${selectedUserForEdit.username} updated successfully.`);
+      setTimeout(() => setSuccessMsg(null), 3000);
+      loadData();
+    } catch (err) {
+      setEditValidationError(err.message || 'Failed to update officer profile');
+    }
+  };
+
+  const handleOpenDeleteModal = (user) => {
+    if (user.id === currentUser?.user_id || user.id === currentUser?.id) {
+      alert('Security Violation: You cannot delete or deactivate your own account.');
+      return;
+    }
+    const isTargetSuperAdmin = user.roles?.includes('SUPER_ADMIN');
+    if (isTargetSuperAdmin && !isSuperAdmin) {
+      alert('Security Policy: Only Super Admin can delete or deactivate Super Admin accounts.');
+      return;
+    }
+    const activeSuperAdmins = users.filter(u => u.roles?.includes('SUPER_ADMIN') && u.status === 'ACTIVE');
+    if (isTargetSuperAdmin && activeSuperAdmins.length <= 1) {
+      alert('Security Violation: Cannot deactivate or delete the last remaining Super Admin account (Administrative Lockout Prevention).');
+      return;
+    }
+    setSelectedUserForDelete(user);
+    setDeleteError('');
+    setIsDeleteModalOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!selectedUserForDelete) return;
+    try {
+      await deleteAdminUser(selectedUserForDelete.id);
+      setIsDeleteModalOpen(false);
+      setSuccessMsg(`Officer account ${selectedUserForDelete.username} deactivated successfully.`);
+      setTimeout(() => setSuccessMsg(null), 4000);
+      loadData();
+    } catch (err) {
+      setDeleteError(err.message || 'Failed to deactivate user account');
+    }
+  };
+
+  const handleCreateUser = async (e) => {
+    e.preventDefault();
+    setCreateValidationError('');
+
+    if (!newUsername.trim() || !newEmail.trim() || !newPassword || !newFullName.trim()) {
+      setCreateValidationError('Please complete all required fields (*).');
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newEmail.trim())) {
+      setCreateValidationError('Please provide a valid official email address format.');
+      return;
+    }
+
+    if (newPassword.length < 8 || !/[a-zA-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      setCreateValidationError('Password must be at least 8 characters long and contain both letters and digits.');
+      return;
+    }
+
+    if (newConfirmPassword && newPassword !== newConfirmPassword) {
+      setCreateValidationError('Passwords do not match. Please verify your confirmation password.');
+      return;
+    }
+
     try {
       await createAdminUser({
         username: newUsername.trim(),
         email: newEmail.trim(),
         password: newPassword,
+        confirm_password: newConfirmPassword,
         full_name: newFullName.trim(),
         department: newDepartment.trim(),
         designation: newDesignation.trim(),
@@ -258,12 +405,13 @@ export default function AdminPanel({ currentUser, onRoleSwitched }) {
       setNewUsername('');
       setNewEmail('');
       setNewPassword('');
+      setNewConfirmPassword('');
       setNewFullName('');
       setSuccessMsg(`Officer account ${newUsername} created successfully`);
       setTimeout(() => setSuccessMsg(null), 4000);
       loadData();
     } catch (err) {
-      alert('Failed to create user: ' + err.message);
+      setCreateValidationError(err.message || 'Failed to create officer account');
     }
   };
 
@@ -480,30 +628,52 @@ export default function AdminPanel({ currentUser, onRoleSwitched }) {
                       <td className="p-3.5 text-[11px] font-mono text-slate-400">
                         {u.last_login ? new Date(u.last_login).toLocaleString() : 'Never'}
                       </td>
-                      <td className="p-3.5 text-right space-x-1.5">
+                      <td className="p-3.5 text-right space-x-1.5 whitespace-nowrap">
                         {cannotModify ? (
                           <span className="text-[11px] font-mono text-amber-400/80 italic">Protected</span>
                         ) : (
                           <>
                             <button
-                              onClick={() => handleOpenRoleModal(u)}
-                              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold transition cursor-pointer"
+                              onClick={() => handleOpenEditModal(u)}
+                              className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold transition cursor-pointer inline-flex items-center space-x-1"
+                              title="Edit Officer Profile"
                             >
-                              Roles
+                              <Edit3 className="w-3 h-3 text-cyan-400" />
+                              <span>Edit</span>
+                            </button>
+                            <button
+                              onClick={() => handleOpenRoleModal(u)}
+                              className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold transition cursor-pointer inline-flex items-center space-x-1"
+                              title="Assign Roles"
+                            >
+                              <Key className="w-3 h-3 text-amber-400" />
+                              <span>Roles</span>
                             </button>
                             {u.status === 'ACTIVE' ? (
                               <button
                                 onClick={() => handleStatusToggle(u, 'SUSPENDED')}
-                                className="px-2.5 py-1 rounded-lg bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border border-amber-800/50 text-[11px] font-semibold transition cursor-pointer"
+                                className="px-2 py-1 rounded-lg bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border border-amber-800/50 text-[11px] font-semibold transition cursor-pointer"
+                                title="Suspend Account"
                               >
                                 Suspend
                               </button>
                             ) : (
                               <button
                                 onClick={() => handleStatusToggle(u, 'ACTIVE')}
-                                className="px-2.5 py-1 rounded-lg bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800/50 text-[11px] font-semibold transition cursor-pointer"
+                                className="px-2 py-1 rounded-lg bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800/50 text-[11px] font-semibold transition cursor-pointer"
+                                title="Activate Account"
                               >
                                 Activate
+                              </button>
+                            )}
+                            {u.id !== currentUser?.user_id && u.id !== currentUser?.id && (
+                              <button
+                                onClick={() => handleOpenDeleteModal(u)}
+                                className="px-2 py-1 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/50 text-[11px] font-semibold transition cursor-pointer inline-flex items-center space-x-1"
+                                title="Deactivate / Soft Delete Account"
+                              >
+                                <Trash2 className="w-3 h-3 text-rose-400" />
+                                <span>Deactivate</span>
                               </button>
                             )}
                           </>
@@ -1144,6 +1314,13 @@ export default function AdminPanel({ currentUser, onRoleSwitched }) {
               </button>
             </div>
 
+            {createValidationError && (
+              <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-center space-x-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+                <span>{createValidationError}</span>
+              </div>
+            )}
+
             <form onSubmit={handleCreateUser} className="space-y-3 text-xs">
               <div>
                 <label className="block text-slate-400 mb-1 font-semibold">Full Name *</label>
@@ -1170,28 +1347,41 @@ export default function AdminPanel({ currentUser, onRoleSwitched }) {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-400 mb-1 font-semibold">Password *</label>
+                  <label className="block text-slate-400 mb-1 font-semibold">Official Email *</label>
                   <input
-                    type="password"
+                    type="email"
                     required
-                    placeholder="Secure password"
-                    value={newPassword}
-                    onChange={e => setNewPassword(e.target.value)}
+                    placeholder="rmohan@nettrace.local"
+                    value={newEmail}
+                    onChange={e => setNewEmail(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500"
                   />
                 </div>
               </div>
 
-              <div>
-                <label className="block text-slate-400 mb-1 font-semibold">Official Email *</label>
-                <input
-                  type="email"
-                  required
-                  placeholder="e.g. rmohan@nettrace.local"
-                  value={newEmail}
-                  onChange={e => setNewEmail(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-slate-400 mb-1 font-semibold">Password * (min 8 chars)</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="Letters & digits"
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-400 mb-1 font-semibold">Confirm Password *</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="Re-type password"
+                    value={newConfirmPassword}
+                    onChange={e => setNewConfirmPassword(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
@@ -1315,6 +1505,171 @@ export default function AdminPanel({ currentUser, onRoleSwitched }) {
                 className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold cursor-pointer text-xs"
               >
                 Save Role Assignments
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: EDIT OFFICER PROFILE */}
+      {isEditModalOpen && selectedUserForEdit && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-md p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <Edit3 className="w-5 h-5 text-cyan-400" />
+                <h3 className="text-base font-bold text-slate-100">
+                  Edit Officer Profile: {selectedUserForEdit.username}
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsEditModalOpen(false)}
+                className="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {editValidationError && (
+              <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-center space-x-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+                <span>{editValidationError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveEditUser} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-400 mb-1 font-semibold">Full Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={editFullName}
+                  onChange={e => setEditFullName(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1 font-semibold">Official Email *</label>
+                <input
+                  type="email"
+                  required
+                  value={editEmail}
+                  onChange={e => setEditEmail(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-slate-400 mb-1 font-semibold">Department</label>
+                  <input
+                    type="text"
+                    value={editDepartment}
+                    onChange={e => setEditDepartment(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-400 mb-1 font-semibold">Designation</label>
+                  <input
+                    type="text"
+                    value={editDesignation}
+                    onChange={e => setEditDesignation(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1 font-semibold">Account Status</label>
+                <select
+                  value={editStatus}
+                  onChange={e => setEditStatus(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500 font-mono"
+                >
+                  <option value="ACTIVE">ACTIVE (Full access)</option>
+                  <option value="SUSPENDED">SUSPENDED (Temporary lock)</option>
+                  <option value="INACTIVE">INACTIVE (Deactivated)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-400 mb-1 font-semibold">Reset Password (leave empty to keep current)</label>
+                <input
+                  type="password"
+                  placeholder="Min 8 characters with letters & digits"
+                  value={editPassword}
+                  onChange={e => setEditPassword(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold cursor-pointer"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: DEACTIVATE / DELETE OFFICER */}
+      {isDeleteModalOpen && selectedUserForDelete && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-rose-500/40 rounded-3xl w-full max-w-md p-6 shadow-2xl space-y-4">
+            <div className="flex items-center space-x-3 text-rose-400 border-b border-slate-800 pb-3">
+              <ShieldAlert className="w-6 h-6 shrink-0" />
+              <div>
+                <h3 className="text-base font-bold text-slate-100">Deactivate Officer Account</h3>
+                <p className="text-[11px] text-slate-400 font-mono">@{selectedUserForDelete.username}</p>
+              </div>
+            </div>
+
+            {deleteError && (
+              <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-center space-x-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+                <span>{deleteError}</span>
+              </div>
+            )}
+
+            <div className="text-xs text-slate-300 space-y-2 leading-relaxed">
+              <p>
+                Are you sure you want to deactivate officer account for <strong className="text-white">{selectedUserForDelete.full_name}</strong>?
+              </p>
+              <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1 text-slate-400 text-[11px]">
+                <p>• Active authentication sessions will be immediately terminated.</p>
+                <p>• Investigation history and evidence lineage will be preserved.</p>
+                <p>• Cryptographic audit chain entries will remain intact.</p>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsDeleteModalOpen(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold cursor-pointer text-xs flex items-center space-x-1.5 shadow-lg shadow-rose-600/30"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Deactivate Officer</span>
               </button>
             </div>
           </div>
